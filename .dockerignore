@@ -1,0 +1,8 @@
+node_modules
+.next
+.cache
+data
+.git
+.env
+.env.*
+*.md

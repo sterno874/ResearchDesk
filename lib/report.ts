@@ -1,0 +1,96 @@
+import { cache } from "react"
+import { loadAnnual } from "./filingdoc"
+import { readOverview } from "./ixbrl"
+import { scoreAll } from "./investors"
+import { getQuote } from "./market"
+import { buildMetrics } from "./metrics"
+import { buildHeadline, buildMemo, buildPitch } from "./narrative"
+import { loadFacts, loadSubmissions, loadUniverse, normalizeTicker } from "./sec"
+import { shorthand } from "./rank"
+import { saveRead } from "./reads"
+import { buildTraps } from "./traps"
+import type { Memo, ReportResult, Trap } from "./types"
+
+function attachWall(memo: Memo, traps: Trap[]): Memo {
+  const wall = traps.find((trap) => trap.timeline)
+  if (!wall?.timeline) return memo
+  return {
+    ...memo,
+    label: memo.kind === "unclear" ? "The debt comes due" : memo.label,
+    summary: memo.summary,
+    stages: [wall.timeline, ...memo.stages.slice(0, 3)],
+  }
+}
+
+export const getReport = cache(async (raw: string): Promise<ReportResult> => {
+  const ticker = normalizeTicker(raw)
+  if (!/^[A-Z0-9-]{1,8}$/.test(ticker)) {
+    return { ok: false, ticker: raw.toUpperCase(), message: "Use a ticker like AAPL or BRK-B." }
+  }
+  const universe = await loadUniverse()
+  const company = universe.byTicker.get(ticker)
+  if (!company) {
+    return {
+      ok: false,
+      ticker,
+      message: `${ticker} is not in the SEC company list, so there are no annual filings to score. Funds and many foreign listings fall outside this desk.`,
+    }
+  }
+
+  const [factsResult, submissionsResult, quoteResult, annualResult] = await Promise.allSettled([
+    loadFacts(company.cik),
+    loadSubmissions(company.cik),
+    getQuote(company.ticker),
+    loadAnnual(company.cik),
+  ])
+  if (factsResult.status === "rejected") {
+    return { ok: false, ticker, message: "EDGAR didn't return the company facts. Try the report again in a moment." }
+  }
+  const metrics = buildMetrics({
+    company,
+    facts: factsResult.value,
+    submissions: submissionsResult.status === "fulfilled" ? submissionsResult.value : null,
+    quote: quoteResult.status === "fulfilled" ? quoteResult.value : null,
+  })
+  if (metrics.revenue == null && metrics.netIncome == null && metrics.equity == null) {
+    return {
+      ok: false,
+      ticker,
+      message: `${company.name} files with the SEC, but the annual statements this desk needs are missing from the XBRL feed.`,
+    }
+  }
+  const investors = scoreAll(metrics).sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
+  const draft = buildMemo(metrics)
+  const submissions = submissionsResult.status === "fulfilled" ? submissionsResult.value : null
+  const traps = buildTraps({
+    facts: factsResult.value,
+    metrics,
+    memo: draft,
+    sic: submissions?.sic ?? null,
+    sicDescription: submissions?.sicDescription ?? null,
+  })
+  const memo = attachWall(draft, traps)
+  const overview = annualResult.status === "fulfilled" && annualResult.value
+    ? readOverview(annualResult.value.html)
+    : ""
+  const sic = submissions?.sicDescription
+  const companyLine = overview
+    || (sic
+      ? `${company.name} files with the SEC as ${sic.toLowerCase()}. The annual report did not yield a clean business description on this pass.`
+      : `${company.name} has annual figures on file. A business description was not extracted on this pass.`)
+  const report = {
+    metrics,
+    investors,
+    memo,
+    company: companyLine,
+    pitch: buildPitch(metrics, memo, traps),
+    headline: buildHeadline(investors),
+    history: quoteResult.status === "fulfilled" ? quoteResult.value.history : [],
+    traps,
+  }
+  await saveRead({ ...shorthand(report), readAt: new Date().toISOString() }).catch(() => undefined)
+  return {
+    ok: true,
+    report,
+  }
+})

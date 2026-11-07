@@ -1,0 +1,189 @@
+export type SourceKind = "sec" | "earnings" | "forum" | "news" | "manual"
+
+export type IdeaSource = {
+  kind: SourceKind
+  label: string
+  title: string
+  url: string
+  at: string
+}
+
+export type Idea = {
+  ticker: string
+  name: string
+  sources: IdeaSource[]
+  addedAt: string
+  updatedAt: string
+  favorite?: boolean
+}
+
+export type CollectSummary = {
+  added: string[]
+  merged: number
+  counts: { label: string; count: number }[]
+  warnings: string[]
+}
+
+export type Filing = {
+  form: string
+  date: string
+  description: string
+  items: string
+  url: string
+}
+
+export type YearPoint = {
+  end: string
+  fy: number | null
+  revenue: number | null
+  netIncome: number | null
+  operatingIncome: number | null
+  operatingMargin: number | null
+  grossMargin: number | null
+  equity: number | null
+}
+
+export type Metrics = {
+  ticker: string
+  name: string
+  cik: string
+  priced: boolean
+  price: number | null
+  previousClose: number | null
+  changePercent: number | null
+  currency: string
+  asOf: string | null
+  fiscalYear: number | null
+  fiscalEnd: string | null
+  shares: number | null
+  marketCap: number | null
+  enterpriseValue: number | null
+  revenue: number | null
+  netIncome: number | null
+  eps: number | null
+  operatingIncome: number | null
+  grossProfit: number | null
+  equity: number | null
+  liabilities: number | null
+  currentAssets: number | null
+  currentLiabilities: number | null
+  debt: number | null
+  cash: number | null
+  cfo: number | null
+  capex: number | null
+  fcf: number | null
+  ownerEarnings: number | null
+  pe: number | null
+  pb: number | null
+  fcfYield: number | null
+  earningsYield: number | null
+  roe: number | null
+  roeAvg: number | null
+  roic: number | null
+  grossMargin: number | null
+  operatingMargin: number | null
+  currentRatio: number | null
+  debtToEquity: number | null
+  dividendYield: number | null
+  bookPerShare: number | null
+  ncavPerShare: number | null
+  grahamNumber: number | null
+  workingCapital: number | null
+  positiveEarningsYears: number
+  earningsYears: number
+  shareChange5y: number | null
+  revenueChange3y: number | null
+  revenueCagr: number | null
+  grossMarginCv: number | null
+  normalOperatingMargin: number | null
+  currentOperatingMargin: number | null
+  priorOperatingMargin: number | null
+  peakRevenue: number | null
+  series: YearPoint[]
+  filings: Filing[]
+  filingsLoaded: boolean
+  schedule13d: boolean
+  insiderForms: number
+  warnings: string[]
+}
+
+export type Part = {
+  id: string
+  label: string
+  weight: number
+  score: number | null
+  reading: string
+  note: string
+}
+
+export type InvestorScore = {
+  id: string
+  name: string
+  era: string
+  score: number | null
+  verdict: string
+  summary: string
+  deciding: string
+  parts: Part[]
+}
+
+export type Target = {
+  bear: number | null
+  base: number | null
+  bull: number | null
+  fairNow: number | null
+  method: string
+  assumptions: string[]
+}
+
+export type Stage = {
+  when: string
+  title: string
+  detail: string
+}
+
+export type Memo = {
+  kind: "turnaround" | "compounder" | "unclear"
+  label: string
+  summary: string
+  stages: Stage[]
+  target: Target
+}
+
+export type Trap = {
+  id: string
+  title: string
+  severity: "wall" | "serious" | "watch"
+  looksLike: string
+  actually: string
+  figures: { label: string; value: string }[]
+  /** One sentence. Used as the headline when this is the sharpest trap. */
+  memoLine?: string
+  timeline?: Stage
+}
+
+export type Quote = {
+  price: number
+  previousClose: number | null
+  changePercent: number | null
+  currency: string
+  asOf: string | null
+  history: { date: string; close: number }[]
+}
+
+export type Report = {
+  metrics: Metrics
+  investors: InvestorScore[]
+  memo: Memo
+  /** Two sentences from the annual report, or the filing class when that prose did not extract. */
+  company: string
+  /** The bet, in one paragraph, before any reader is named. */
+  pitch: string
+  headline: string
+  history: { date: string; close: number }[]
+  traps: Trap[]
+}
+
+export type ReportResult =
+  | { ok: true; report: Report }
+  | { ok: false; ticker: string; message: string }
