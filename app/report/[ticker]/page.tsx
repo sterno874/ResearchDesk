@@ -1,7 +1,10 @@
 import { ReportView } from "@/components/ReportView"
 import { getReport } from "@/lib/report"
+import { researchApi } from "@/lib/remote"
+import type { ReportResult } from "@/lib/types"
 
 export const dynamic = "force-dynamic"
+export const maxDuration = 300
 
 export async function generateMetadata({ params }: { params: Promise<{ ticker: string }> }) {
   const { ticker } = await params
@@ -10,7 +13,10 @@ export async function generateMetadata({ params }: { params: Promise<{ ticker: s
 
 export default async function ReportPage({ params }: { params: Promise<{ ticker: string }> }) {
   const { ticker } = await params
-  const result = await getReport(ticker)
+  const remote = researchApi()
+  const result: ReportResult = remote
+    ? await fetch(`${remote}/api/report/${encodeURIComponent(ticker)}`, { cache: "no-store" }).then((response) => response.json())
+    : await getReport(ticker)
   if (!result.ok) {
     return (
       <main className="panel">

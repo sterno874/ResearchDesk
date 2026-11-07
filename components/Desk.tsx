@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react"
 import { Pips } from "@/components/Pips"
 import type { BlotterRead } from "@/lib/rank"
+import { apiUrl } from "@/lib/remote"
 import type { CollectSummary, Idea, SourceKind } from "@/lib/types"
 
 const FILTERS: { id: "all" | "saved" | SourceKind; label: string }[] = [
@@ -60,7 +61,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
     async function rank() {
       setRanking(true)
       try {
-        const cached = await fetch("/api/rank").then((response) => response.json()) as { reads?: Record<string, BlotterRead> }
+        const cached = await fetch(apiUrl("/api/rank")).then((response) => response.json()) as { reads?: Record<string, BlotterRead> }
         if (cancel) return
         const have = cached.reads ?? {}
         setReads(have)
@@ -72,7 +73,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
         for (let index = 0; index < missing.length; index += 4) {
           if (cancel) return
           const slice = missing.slice(index, index + 4)
-          const response = await fetch("/api/rank", {
+          const response = await fetch(apiUrl("/api/rank"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ tickers: slice }),
@@ -117,7 +118,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
     setBusy("collect")
     setError(null)
     try {
-      const response = await fetch("/api/collect", { method: "POST" })
+      const response = await fetch(apiUrl("/api/collect"), { method: "POST" })
       const body = await response.json()
       if (!response.ok) throw new Error(body.error || "Collect failed")
       setIdeas(body.ideas)
@@ -136,7 +137,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
     setBusy("add")
     setError(null)
     try {
-      const response = await fetch("/api/watchlist", {
+      const response = await fetch(apiUrl("/api/watchlist"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ticker: next }),
@@ -159,7 +160,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
     const next = !idea.favorite
     setIdeas((current) => current.map((item) => item.ticker === idea.ticker ? { ...item, favorite: next } : item))
     try {
-      const response = await fetch("/api/watchlist", {
+      const response = await fetch(apiUrl("/api/watchlist"), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ticker: idea.ticker, favorite: next }),
@@ -179,7 +180,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
     setBusy(symbol)
     setError(null)
     try {
-      const response = await fetch(`/api/watchlist?ticker=${encodeURIComponent(symbol)}`, { method: "DELETE" })
+      const response = await fetch(apiUrl(`/api/watchlist?ticker=${encodeURIComponent(symbol)}`), { method: "DELETE" })
       const body = await response.json()
       if (!response.ok) throw new Error(body.error || "Couldn't remove it")
       setIdeas(body.ideas)
