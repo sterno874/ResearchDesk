@@ -82,6 +82,12 @@ button { cursor: pointer; }
   letter-spacing: 0.04em;
 }
 
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
 .session {
   margin: 0;
   font-family: var(--font-mono), ui-monospace, monospace;
@@ -89,6 +95,42 @@ button { cursor: pointer; }
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--gold);
+}
+
+.tutorial { position: relative; }
+
+.tutorial-btn { padding: 6px 10px; font-size: 12px; }
+
+.tutorial-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 12px);
+  width: min(460px, calc(100vw - 36px));
+  padding: 16px 16px 14px;
+  background: var(--card);
+  border: 1px solid var(--gold);
+  z-index: 6;
+}
+
+.tutorial-panel h2 {
+  margin: 4px 0 8px;
+  font-size: 20px;
+  text-transform: none;
+  letter-spacing: -0.02em;
+}
+
+.tutorial-panel p { margin: 0; max-width: none; }
+
+.tutorial-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.dive-mark {
+  margin-left: 8px;
+  color: var(--ink-soft);
 }
 
 .kicker, .eyebrow {
@@ -176,7 +218,8 @@ h2 {
   flex: 1;
 }
 
-input[type="text"] {
+input[type="text"],
+input[type="search"] {
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--gold);
@@ -186,6 +229,23 @@ input[type="text"] {
   font-family: var(--font-mono), ui-monospace, monospace;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+input[type="search"] {
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+input[type="search"]::-webkit-search-cancel-button {
+  filter: invert(1);
+}
+
+.find {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 420px;
+  margin: 18px 0 0;
 }
 
 .btn {
@@ -323,6 +383,12 @@ input[type="text"] {
 }
 
 .shorthand .horizon { flex: 0 0 auto; }
+
+.file-note {
+  margin: 8px 0 0;
+  max-width: 68ch;
+  color: var(--ink-soft);
+}
 
 .save {
   background: transparent;

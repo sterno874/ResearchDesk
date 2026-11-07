@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google"
+import { Tutorial } from "@/components/Tutorial"
 import "./globals.css"
 
 const sans = IBM_Plex_Sans({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-sans" })
@@ -23,7 +24,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <span className="brand-name">Research Desk</span>
               </span>
             </a>
-            <p className="session">Filings · Price · Rubric</p>
+            <div className="top-actions">
+              <Tutorial />
+              <p className="session">Filings · Price · Rubric</p>
+            </div>
           </header>
           {children}
           <footer className="foot">

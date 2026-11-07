@@ -157,6 +157,7 @@ export function ReportView({ report }: { report: Report }) {
         <Pips stars={read.stars} />
         <span className={`horizon ${read.horizon}`}>{read.horizonLabel}</span>
       </p>
+      {read.fileNote ? <p className="file-note">{read.fileNote}</p> : null}
       <p className="reader-line">{headline}</p>
       <p className="deeper">
         <a className="btn" href={`/dive/${metrics.ticker}`}>Kick off a deep dive</a>

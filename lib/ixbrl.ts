@@ -18,6 +18,9 @@ export type AnnualRead = {
   programmatic: string
   ebitdaDefinition: string
   rivals: string[]
+  /** Sentences from the MD&A that say why a category's sales moved. */
+  drivers: string[]
+  competitiveFactors: string
 }
 
 type Member = { dimension: string; name: string }
@@ -33,11 +36,16 @@ function words(member: string): string {
     .replace(/SegmentMember$/, "")
     .replace(/Member$/, "")
   return stem
+    .replace(/^IPhone$/, "iPhone")
+    .replace(/^IPad$/, "iPad")
+    .replace(/([a-z])and(?=[A-Z])/g, "$1 and ")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
     .replace(/\bNon\b/g, "excluding")
     .replace(/\bAnd\b/g, "and")
     .replace(/ excluding (\w+)/, (_, word: string) => `, excluding ${word.toLowerCase()}`)
+    .replace(/and([A-Z])/g, "and $1")
+    .replace(/^I([A-Z])/, "i$1")
     .replace(/\s+/g, " ")
     .trim()
 }
@@ -61,6 +69,14 @@ function kindOf(name: string): { kind: Kind; rank: number; ebitdaLabel: string |
     return { kind: "direct", rank: 2, ebitdaLabel: null }
   }
   if (/SellingGeneralAndAdministrative/.test(local)) return { kind: "sga", rank: 2, ebitdaLabel: null }
+  if (/OperatingIncomeLoss/.test(local)) {
+    const shared = /ExcludingUnallocated/.test(local)
+    return {
+      kind: "ebitda",
+      rank: shared ? 2 : 1,
+      ebitdaLabel: shared ? "Operating income before shared costs" : "Operating income",
+    }
+  }
   return null
 }
 
@@ -82,7 +98,18 @@ function attrs(source: string): Record<string, string> {
 
 function isSegmentMember(member: Member): boolean {
   const name = localName(member.name)
-  return /SegmentMember$/.test(name) && !/^OperatingSegmentsMember$/.test(name)
+  return /SegmentMember$/.test(name) && !/SegmentsMember$/.test(name) && !/^OperatingSegmentsMember$/.test(name)
+}
+
+function isChannel(member: Member): boolean {
+  return /SalesChannelAxis/.test(member.dimension)
+}
+
+function channelLabel(member: Member): string {
+  const name = localName(member.name)
+  if (/DirectlyToConsumer/.test(name)) return "Direct to consumer"
+  if (/ThroughIntermediary|Wholesale/.test(name)) return "Wholesale"
+  return words(member.name)
 }
 
 function isSkipped(member: Member): boolean {
@@ -90,10 +117,20 @@ function isSkipped(member: Member): boolean {
 }
 
 function isProduct(member: Member): boolean {
-  const name = localName(member.name)
   if (isSegmentMember(member) || isSkipped(member)) return false
-  if (/OperatingSegmentsMember$/.test(name)) return false
-  return /ProductOrServiceAxis/.test(member.dimension) || /Member$/.test(name)
+  return /ProductOrServiceAxis/.test(member.dimension)
+}
+
+function isRollup(member: Member): boolean {
+  const name = localName(member.name)
+  return name === "ProductMember" || name === "ServiceMember"
+}
+
+function productLabel(member: Member): string {
+  const word = words(member.name)
+  if (word === "Product") return "Products"
+  if (word === "Service") return "Services"
+  return word
 }
 
 type Slot = {
@@ -117,8 +154,18 @@ function looksLikeContents(after: string): boolean {
 
 function clipItem(rest: string): string {
   const trimmed = rest.trim()
-  const end = trimmed.search(/\bitem\s+1a\b/i)
-  return (end > 500 ? trimmed.slice(0, end) : trimmed.slice(0, 8000)).trim()
+  let end = -1
+  for (const match of trimmed.matchAll(/\bitem\s+1a\b/gi)) {
+    const at = match.index ?? 0
+    const before = trimmed.slice(Math.max(0, at - 70), at).toLowerCase()
+    if (/refer to|see\b|part i,|described in|discussed in|included in|set forth in/.test(before)) continue
+    const after = trimmed.slice(at, at + 36).toLowerCase()
+    if (!/risk/.test(after)) continue
+    end = at
+    break
+  }
+  if (end > 500) return trimmed.slice(0, end).trim()
+  return trimmed.slice(0, 20000).trim()
 }
 
 function readItem(plain: string): string {
@@ -184,13 +231,22 @@ export function readAnnual(html: string): AnnualRead {
     if (!context || !meta) continue
     if (context.members.some(isSkipped)) continue
     const segmentMember = context.members.find(isSegmentMember)
-    if (!segmentMember) continue
     const productMember = context.members.find(isProduct)
+    const channelMember = context.members.find(isChannel)
+    if (!segmentMember && !productMember && !channelMember) continue
     const value = amount(match[2], fact.scale, fact.sign)
     if (value == null) continue
     const year = Number(context.end.slice(0, 4))
-    const segment = words(segmentMember.name)
-    const product = productMember ? words(productMember.name) : null
+    const segment = segmentMember
+      ? words(segmentMember.name)
+      : channelMember
+        ? "Channel"
+        : isRollup(productMember!) ? "Rollup" : "Category"
+    const product = segmentMember
+      ? (productMember ? productLabel(productMember) : null)
+      : channelMember
+        ? channelLabel(channelMember)
+        : productLabel(productMember!)
     const key = `${year}|${segment}|${product ?? ""}`
     const slot = slots.get(key) ?? {
       segment,
@@ -235,25 +291,26 @@ export function readAnnual(html: string): AnnualRead {
   const plain = htmlToText(html)
   const item = readItem(plain)
   const competitionAt = item.search(/\bCompetition\b/)
-  const competition = competitionAt >= 0 ? sentences(item.slice(competitionAt, competitionAt + 1600), 4) : ""
+  const competition = competitionAt >= 0 ? sentences(item.slice(competitionAt, competitionAt + 1800), 5) : ""
+  const factorsAt = item.search(/principal competitive factors/i)
+  const competitiveFactors = factorsAt >= 0 ? sentences(item.slice(Math.max(0, factorsAt - 20), factorsAt + 500), 2) : ""
   const programmatic = sentenceAround(item, "programmatic")
   const definedAt = plain.indexOf("Segment Adjusted EBITDA is calculated")
   const ebitdaDefinition = definedAt >= 0 ? sentences(plain.slice(definedAt, definedAt + 500), 2) : ""
 
   return {
     lines,
-    overview: sentences(item, 4),
+    overview: businessSentences(item, 2) || sentences(item, 2),
     competition,
     programmatic,
     ebitdaDefinition,
     rivals: rivalsIn(competition),
+    drivers: categoryDrivers(plain),
+    competitiveFactors,
   }
 }
 
-/** The first real sentence of the business section. Used at the top of a report, before any score. */
-export function readOverview(html: string): string {
-  const plain = htmlToText(html).replace(/[•●▪◦]/g, " ")
-  const item = readItem(plain)
+function businessSentences(item: string, count: number): string {
   const parts = item
     .split(/(?<=\.)\s+/)
     .map((part) => part.replace(/^(company background|business overview|overview)\s+/i, "").replace(/\s+/g, " ").trim())
@@ -264,5 +321,23 @@ export function readOverview(html: string): string {
       if (/fiscal year is the 52-/i.test(part)) return false
       return /\b(is|are|was|were|designs|manufactures|operates|provides|sells|develops|owns|has|have|makes|offers)\b/i.test(part)
     })
-  return parts[0] ?? ""
+  return parts.slice(0, count).join(" ")
+}
+
+function categoryDrivers(plain: string): string[] {
+  const at = plain.search(/net sales by category/i)
+  if (at < 0) return []
+  const window = plain.slice(at, at + 2400)
+  return window
+    .split(/(?<=\.)\s+/)
+    .map((part) => part.replace(/\s+/g, " ").trim().replace(/^(\S+)\s+\1\b/i, "$1"))
+    .filter((part) => /net sales (increased|decreased|were|was)/i.test(part) && part.length < 320)
+    .slice(0, 6)
+}
+
+/** The first real sentence of the business section. Used at the top of a report, before any score. */
+export function readOverview(html: string): string {
+  const plain = htmlToText(html).replace(/[•●▪◦]/g, " ")
+  const item = readItem(plain)
+  return businessSentences(item, 1)
 }

@@ -182,6 +182,8 @@ export type Report = {
   headline: string
   history: { date: string; close: number }[]
   traps: Trap[]
+  /** Pieces of the profile the filings did not fill. They cap the stars. */
+  gaps: string[]
 }
 
 export type ReportResult =

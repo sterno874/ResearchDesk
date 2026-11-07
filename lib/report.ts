@@ -1,15 +1,34 @@
 import { cache } from "react"
-import { loadAnnual } from "./filingdoc"
-import { readOverview } from "./ixbrl"
+import { loadAnnual, loadProxy } from "./filingdoc"
+import { readAnnual, readOverview } from "./ixbrl"
+import { readPeople } from "./people"
 import { scoreAll } from "./investors"
 import { getQuote } from "./market"
 import { buildMetrics } from "./metrics"
 import { buildHeadline, buildMemo, buildPitch } from "./narrative"
 import { loadFacts, loadSubmissions, loadUniverse, normalizeTicker } from "./sec"
-import { shorthand } from "./rank"
+import { shorthand, statementGaps } from "./rank"
 import { saveRead } from "./reads"
 import { buildTraps } from "./traps"
 import type { Memo, ReportResult, Trap } from "./types"
+
+function profileGaps(input: {
+  company: string
+  metrics: { revenue: number | null; operatingIncome: number | null; netIncome: number | null; equity: number | null; cfo: number | null; fcf: number | null }
+  annual: { lines: { revenue: number | null }[] } | null
+  officers: number
+  triedProxy: boolean
+}): string[] {
+  const draft = {
+    company: input.company,
+    metrics: input.metrics,
+  }
+  const gaps = statementGaps(draft as Parameters<typeof statementGaps>[0])
+  const split = input.annual?.lines.some((line) => (line.revenue ?? 0) > 0) ?? false
+  if (!split) gaps.push("what the business sells")
+  if (!input.triedProxy || input.officers === 0) gaps.push("who runs it")
+  return gaps
+}
 
 function attachWall(memo: Memo, traps: Trap[]): Memo {
   const wall = traps.find((trap) => trap.timeline)
@@ -37,11 +56,12 @@ export const getReport = cache(async (raw: string): Promise<ReportResult> => {
     }
   }
 
-  const [factsResult, submissionsResult, quoteResult, annualResult] = await Promise.allSettled([
+  const [factsResult, submissionsResult, quoteResult, annualResult, proxyResult] = await Promise.allSettled([
     loadFacts(company.cik),
     loadSubmissions(company.cik),
     getQuote(company.ticker),
     loadAnnual(company.cik),
+    loadProxy(company.cik),
   ])
   if (factsResult.status === "rejected") {
     return { ok: false, ticker, message: "EDGAR didn't return the company facts. Try the report again in a moment." }
@@ -78,6 +98,16 @@ export const getReport = cache(async (raw: string): Promise<ReportResult> => {
     || (sic
       ? `${company.name} files with the SEC as ${sic.toLowerCase()}. The annual report did not yield a clean business description on this pass.`
       : `${company.name} has annual figures on file. A business description was not extracted on this pass.`)
+  const annual = annualResult.status === "fulfilled" ? annualResult.value : null
+  const parsedAnnual = annual ? readAnnual(annual.html) : null
+  const people = proxyResult.status === "fulfilled" && proxyResult.value ? readPeople(proxyResult.value.html) : null
+  const gaps = profileGaps({
+    company: companyLine,
+    metrics,
+    annual: parsedAnnual,
+    officers: people?.officers.length ?? 0,
+    triedProxy: proxyResult.status === "fulfilled",
+  })
   const report = {
     metrics,
     investors,
@@ -87,6 +117,7 @@ export const getReport = cache(async (raw: string): Promise<ReportResult> => {
     headline: buildHeadline(investors),
     history: quoteResult.status === "fulfilled" ? quoteResult.value.history : [],
     traps,
+    gaps,
   }
   await saveRead({ ...shorthand(report), readAt: new Date().toISOString() }).catch(() => undefined)
   return {

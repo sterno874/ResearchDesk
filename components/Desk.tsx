@@ -48,6 +48,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
   const [summary, setSummary] = useState<CollectSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("all")
+  const [query, setQuery] = useState("")
   const [sort, setSort] = useState<(typeof SORTS)[number]["id"]>("rank")
   const [reads, setReads] = useState<Record<string, BlotterRead>>({})
   const [ranking, setRanking] = useState(false)
@@ -94,7 +95,16 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
     }
   }, [tickerKey])
 
+  const needle = query.trim().toLowerCase()
   const shown = ideas
+    .filter((idea) => {
+      if (!needle) return true
+      const ticker = idea.ticker.toLowerCase()
+      const name = idea.name.toLowerCase()
+      const compact = needle.replace(/[^a-z0-9]/g, "")
+      const tickerCompact = ticker.replace(/[^a-z0-9]/g, "")
+      return ticker.includes(needle) || name.includes(needle) || (compact.length > 0 && tickerCompact.includes(compact))
+    })
     .filter((idea) => {
       if (filter === "all") return true
       if (filter === "saved") return Boolean(idea.favorite)
@@ -226,6 +236,20 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
       {summary?.warnings.length ? <p className="status warn">{summary.warnings.join(" ")}</p> : null}
       {error ? <p className="status warn">{error}</p> : null}
 
+      <label className="find">
+        <span className="kicker">Find on the desk</span>
+        <input
+          type="search"
+          name="find"
+          value={query}
+          placeholder="Ticker or company"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </label>
+
       <div className="blotter-controls">
         <div className="filters" role="group" aria-label="Filter the blotter">
           {FILTERS.map((item) => (
@@ -255,7 +279,11 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
           <p className="lede">
             {ideas.length === 0
               ? "The desk is empty. Collect a batch, or type a ticker you already have in mind."
-              : "Nothing in this filter."}
+              : needle && filter !== "all"
+                ? "Nothing in this filter matches that."
+                : needle
+                  ? "Nothing on the desk matches that."
+                  : "Nothing in this filter."}
           </p>
         </div>
       ) : (
@@ -272,6 +300,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
                   </div>
                   <div className={`horizon ${read?.horizon ?? "none"}`} title={read?.why}>
                     {read ? read.horizonLabel : ranking ? "Reading" : "No read"}
+                    {read?.depth && read.depth > 1 ? <span className="dive-mark">Dive {read.depth}</span> : null}
                   </div>
                   <div className="kicker">{when(lead?.at || idea.updatedAt)}</div>
                 </a>

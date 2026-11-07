@@ -2,7 +2,9 @@ import { money, plainPct } from "./format"
 import { companySic, loadAnnual, loadProxy } from "./filingdoc"
 import { readAnnual, type AnnualRead, type SegmentLine } from "./ixbrl"
 import { readPeople, type PeopleRead } from "./people"
+import { shorthand } from "./rank"
 import { getReport } from "./report"
+import { saveRead } from "./reads"
 import type { Report, Trap } from "./types"
 
 export type DiveBlock =
@@ -124,7 +126,7 @@ export async function getDive(raw: string, depth: number): Promise<{ ok: true; d
     level >= 4 ? trendLayer(report, annual) : null,
     level >= 5 ? fieldLayer(annual, sic, sicDescription, report.metrics.name) : null,
     level >= 6 ? peopleLayer(proxy, proxyUrl) : null,
-    level >= 7 ? openLayer(report, annual, proxy) : null,
+    level >= 7 ? openLayer(report, annual, proxy, sic, sicDescription) : null,
   ].filter((layer): layer is DiveLayer => layer != null)
 
   const steps: DiveStep[] = STEPS.map((step) => ({
@@ -151,7 +153,43 @@ export async function getDive(raw: string, depth: number): Promise<{ ok: true; d
     proxyUrl ? { label: `Proxy filed ${proxyFiled}`, url: proxyUrl } : null,
   ].filter((source): source is { label: string; url: string } => source != null)
 
+  const base = shorthand({ ...report, gaps: gapsAfterDive(report.gaps, level, annual, proxy) })
+  await saveRead({
+    ...base,
+    depth: level,
+    why: `${base.why} ${diveNote(level, annual, proxy)}`,
+    readAt: new Date().toISOString(),
+  }).catch(() => undefined)
+
   return { ok: true, dive: { ticker: report.metrics.ticker, name: report.metrics.name, depth: level, layers, steps, next, sources } }
+}
+
+function gapsAfterDive(gaps: string[], level: number, annual: AnnualRead | null, proxy: PeopleRead | null): string[] {
+  const next = new Set(gaps)
+  const split = annual?.lines.some((line) => (line.revenue ?? 0) > 0) ?? false
+  if (level >= 2 && split) next.delete("what the business sells")
+  if (level >= 2 && annual && !split) next.add("what the business sells")
+  if (level >= 6 && proxy && proxy.officers.length > 0) next.delete("who runs it")
+  if (level >= 6 && (!proxy || proxy.officers.length === 0)) next.add("who runs it")
+  return [...next]
+}
+
+function diveNote(level: number, annual: AnnualRead | null, proxy: PeopleRead | null): string {
+  const step = STEPS[level - 1]?.title ?? "Shape"
+  if (level >= 6 && proxy) {
+    const officers = proxy.officers.length
+    const named = officers ? ` The proxy names ${officers} officer${officers === 1 ? "" : "s"}.` : " The proxy was read."
+    return `The dive is through ${step}, ${level} of 7.${named} The stars start from the median of the six readers.`
+  }
+  if (level >= 2 && annual) {
+    const segments = new Set(annual.lines.filter((line) => line.product == null && (line.revenue ?? 0) > 0).map((line) => line.segment)).size
+    const named = segments ? ` The annual report tags ${segments} segment${segments === 1 ? "" : "s"}.` : " The annual report was read."
+    return `The dive is through ${step}, ${level} of 7.${named} The stars start from the median of the six readers.`
+  }
+  if (level >= 2) {
+    return `The dive reached ${step}, ${level} of 7. The annual report did not add a segment table. The stars start from the median of the six readers.`
+  }
+  return "The wide cut was refreshed. The stars start from the median of the six readers."
 }
 
 function shapeLayer(report: Report, sicDescription: string | null): DiveLayer {
@@ -204,12 +242,51 @@ function businessLayer(report: Report, annual: AnnualRead | null, warnings: stri
       }),
     })
   }
-  if (products.length) {
+  const categories = products.filter((line) => line.segment === "Category")
+  const rollup = products.filter((line) => line.segment === "Rollup")
+  const channels = products.filter((line) => line.segment === "Channel")
+  const nested = products.filter((line) => line.segment !== "Category" && line.segment !== "Rollup" && line.segment !== "Channel")
+  if (categories.length) {
+    const categoryTotal = categories.reduce((sum, line) => sum + (line.revenue ?? 0), 0)
+    blocks.push({
+      type: "table",
+      caption: `${latest} net sales by what is sold`,
+      columns: ["Category", "Revenue", "Share"],
+      rows: categories
+        .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0))
+        .map((line) => [line.product ?? "", money(line.revenue), plainPct(categoryTotal ? (line.revenue ?? 0) / categoryTotal : null, 0)]),
+    })
+  }
+  if (rollup.length) {
+    blocks.push({
+      type: "table",
+      caption: `${latest} products and services, with the gross margin the filing tags`,
+      columns: ["Group", "Revenue", "Cost", "Gross margin"],
+      rows: rollup
+        .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0))
+        .map((line) => [line.product ?? "", money(line.revenue), money(line.direct), plainPct(grossMargin(line), 1)]),
+    })
+  }
+  if (channels.length) {
+    const channelTotal = channels.reduce((sum, line) => sum + (line.revenue ?? 0), 0)
+    blocks.push({
+      type: "table",
+      caption: `${latest} wholesale and direct`,
+      columns: ["Channel", "Revenue", "Share"],
+      rows: channels
+        .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0))
+        .map((line) => [line.product ?? "", money(line.revenue), plainPct(channelTotal ? (line.revenue ?? 0) / channelTotal : null, 0)]),
+    })
+  }
+  if (segments.some((row) => /before shared costs/i.test(row.ebitdaLabel ?? ""))) {
+    blocks.push({ type: "note", text: "Brand operating income is the figure the company assigns to the brand, before the costs it does not allocate." })
+  }
+  if (nested.length) {
     blocks.push({
       type: "table",
       caption: `${latest} product lines inside those segments`,
       columns: ["Line", "Inside", "Revenue"],
-      rows: products
+      rows: nested
         .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0))
         .map((line) => [line.product ?? "", line.segment, money(line.revenue)]),
     })
@@ -233,14 +310,100 @@ function unitLayer(report: Report, annual: AnnualRead | null, sic: string | null
     if (annual?.programmatic) blocks.push({ type: "p", text: `The annual report's own words: ${annual.programmatic}` })
   } else if (satellite(report.metrics.name, sicDescription)) {
     blocks.push({ type: "p", text: "The unit here is a subscriber who pays. Listening hours, subscriber counts, and advertising revenue do not convert into one another, and this is a poor stand-in for an ad-supported broadcaster." })
+  } else if (annual && categoryLines(annual).length) {
+    blocks.push({ type: "p", text: categoryUnit(annual, report) })
+    if (annual.drivers.length) blocks.push({ type: "p", text: `The annual report's own account of the change: ${annual.drivers.join(" ")}` })
+  } else if (rows.length || (annual && annual.lines.some((line) => line.segment === "Channel"))) {
+    blocks.push({ type: "p", text: segmentUnit(report, annual, rows) })
   } else {
     blocks.push({ type: "p", text: "The unit is the thing that repeats and gets priced: a subscriber, a store, a ton, an ad. Consolidated revenue is that unit times a price, summed. Until the filing splits it, a growth rate is a blend of volume and price." })
   }
 
   const bridge = describeBridge(rows)
   if (bridge) blocks.push({ type: "p", text: bridge.text }, { type: "figures", items: bridge.figures })
+  else if (grewAcross(rows)) blocks.push({ type: "note", text: "Every reportable segment with two years of revenue grew. There is no shrinking book to offset against a growing one." })
   else blocks.push({ type: "note", text: "Two years of segment profit were not both tagged, so the bridge from a shrinking line to a growing line cannot be finished from this annual report." })
   return { id: "unit", n: 3, title: "The unit, and what offsets what", blocks }
+}
+
+function segmentUnit(report: Report, annual: AnnualRead | null, rows: Totals[]): string {
+  const years = yearsOf(rows)
+  const latest = years[0]
+  const current = latest == null ? [] : rows.filter((row) => row.year === latest).sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0))
+  const [lead, second] = current
+  const total = report.metrics.revenue
+  const branded = current.some((row) => /brand/i.test(row.segment))
+  let text = branded
+    ? "The filing splits the business by brand rather than by a counted unit."
+    : "The filing splits sales by the segments it reports."
+  if (lead?.revenue != null && total) {
+    text = `${lead.segment} is ${plainPct(lead.revenue / total, 0)} of sales, ${money(lead.revenue)}.`
+    if (second?.revenue != null) text += ` ${second.segment} is ${plainPct(second.revenue / total, 0)}, ${money(second.revenue)}.`
+  }
+  if (lead?.ebitda != null) {
+    const label = (lead.ebitdaLabel ?? "Operating income").toLowerCase()
+    text += ` ${lead.segment} ${label} is ${money(lead.ebitda)}`
+    text += lead.margin != null ? `, ${plainPct(lead.margin, 0)} of its sales.` : "."
+    if (second?.ebitda != null) text += ` ${second.segment} is ${money(second.ebitda)}${second.margin != null ? `, ${plainPct(second.margin, 0)}` : ""}.`
+  }
+  const channels = (annual?.lines ?? []).filter((line) => line.segment === "Channel" && line.year === latest && (line.revenue ?? 0) > 0)
+  if (channels.length) {
+    text += ` By channel, ${channels
+      .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0))
+      .map((line) => `${line.product} ${money(line.revenue)}`)
+      .join(" and ")}.`
+  }
+  text += " The count of units sold, and the price of one unit, are not separated. A change in revenue is still volume and price together."
+  return text
+}
+
+function grossMargin(line: { revenue: number | null; direct: number | null }): number | null {
+  if (line.revenue == null || line.direct == null || line.revenue === 0) return null
+  return (line.revenue - line.direct) / line.revenue
+}
+
+function categoryLines(annual: AnnualRead): SegmentLine[] {
+  const rows = annual.lines.filter((line) => line.segment === "Category" && line.product && (line.revenue ?? 0) > 0)
+  if (!rows.length) return []
+  const latest = Math.max(...rows.map((line) => line.year))
+  return rows.filter((line) => line.year === latest).sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0))
+}
+
+function categoryUnit(annual: AnnualRead, report: Report): string {
+  const categories = categoryLines(annual)
+  const total = categories.reduce((sum, line) => sum + (line.revenue ?? 0), 0)
+  const lead = categories[0]
+  const share = lead?.revenue != null && total ? lead.revenue / total : null
+  const rollup = annual.lines.filter((line) => line.segment === "Rollup" && line.year === lead?.year)
+  const products = rollup.find((line) => line.product === "Products")
+  const services = rollup.find((line) => line.product === "Services")
+  let text = lead
+    ? `The filing splits sales by what is sold. ${lead.product} is ${plainPct(share, 0)} of that, ${money(lead.revenue)}.`
+    : "The filing splits sales by what is sold."
+  const productMargin = products ? grossMargin(products) : null
+  const serviceMargin = services ? grossMargin(services) : null
+  if (products && services && productMargin != null && serviceMargin != null) {
+    text += ` Products as a group earned a ${plainPct(productMargin, 1)} gross margin on ${money(products.revenue)}. Services earned ${plainPct(serviceMargin, 1)} on ${money(services.revenue)}. The consolidated margin is a blend of those two.`
+    if (serviceMargin > productMargin) text += " The services line is the richer margin."
+  }
+  text += " Units sold, and the price of one unit, are not in the filing. A growth rate here is still a blend of volume and price."
+  if (report.metrics.revenue && total && Math.abs(total - report.metrics.revenue) / report.metrics.revenue > 0.05) {
+    text += " The category tags do not add up to the consolidated revenue, so the split is incomplete."
+  }
+  return text
+}
+
+function grewAcross(rows: Totals[]): boolean {
+  const years = yearsOf(rows)
+  if (years.length < 2) return false
+  const [latest, prior] = years
+  const names = [...new Set(rows.map((row) => row.segment))]
+  const paired = names.map((name) => {
+    const now = rows.find((row) => row.segment === name && row.year === latest)?.revenue
+    const then = rows.find((row) => row.segment === name && row.year === prior)?.revenue
+    return now != null && then != null ? now - then : null
+  }).filter((delta): delta is number => delta != null)
+  return paired.length >= 2 && paired.every((delta) => delta >= 0)
 }
 
 function describeBridge(rows: Totals[]): { text: string; figures: { label: string; value: string }[] } | null {
@@ -303,6 +466,16 @@ function trendLayer(report: Report, annual: AnnualRead | null): DiveLayer {
   const years = yearsOf(rows).slice(0, 4).sort((a, b) => a - b)
   const blocks: DiveBlock[] = []
   const consolidated = [...report.metrics.series].reverse().filter((year) => year.revenue != null).slice(-4)
+  if (consolidated.length >= 2) {
+    const first = consolidated[0]
+    const last = consolidated[consolidated.length - 1]
+    const firstYear = first.fy ?? first.end.slice(0, 4)
+    const lastYear = last.fy ?? last.end.slice(0, 4)
+    blocks.push({
+      type: "p",
+      text: `Consolidated revenue went from ${money(first.revenue)} in ${firstYear} to ${money(last.revenue)} in ${lastYear}. Operating margin went from ${plainPct(first.operatingMargin, 1)} to ${plainPct(last.operatingMargin, 1)}.`,
+    })
+  }
   if (consolidated.length) {
     blocks.push({
       type: "table",
@@ -310,6 +483,22 @@ function trendLayer(report: Report, annual: AnnualRead | null): DiveLayer {
       columns: ["Year", "Revenue", "Operating margin"],
       rows: consolidated.map((year) => [String(year.fy ?? year.end.slice(0, 4)), money(year.revenue), plainPct(year.operatingMargin, 1)]),
     })
+  }
+  if (annual) {
+    const categories = annual.lines.filter((line) => line.segment === "Category" && line.product && (line.revenue ?? 0) > 0)
+    const categoryYears = [...new Set(categories.map((line) => line.year))].sort((a, b) => a - b).slice(-4)
+    const categoryNames = [...new Set(categories.map((line) => line.product ?? ""))]
+    if (categoryYears.length && categoryNames.length) {
+      blocks.push({
+        type: "table",
+        caption: "Net sales by category",
+        columns: ["Category", ...categoryYears.map(String)],
+        rows: categoryNames.map((name) => [
+          name,
+          ...categoryYears.map((year) => money(categories.find((line) => line.product === name && line.year === year)?.revenue ?? null)),
+        ]),
+      })
+    }
   }
   if (years.length && rows.length) {
     const names = [...new Set(rows.map((row) => row.segment))]
@@ -356,16 +545,29 @@ function fieldLayer(annual: AnnualRead | null, sic: string | null, sicDescriptio
     })
   }
   if (annual?.competition) blocks.push({ type: "p", text: annual.competition })
-  if (annual?.rivals.length) {
+  if (annual?.competitiveFactors && annual.competitiveFactors !== annual.competition) {
+    blocks.push({ type: "p", text: annual.competitiveFactors })
+  }
+  const rivals = (annual?.rivals ?? []).filter((rival) => !sameFirm(rival, name))
+  if (rivals.length) {
     blocks.push({
       type: "p",
-      text: `Names the competition section actually uses: ${annual.rivals.join(", ")}. A name in that section is a rival the company chose to mention. It is not a valuation comp until the customer and the unit match.`,
+      text: `Names the competition section actually uses: ${rivals.join(", ")}. A name in that section is a rival the company chose to mention. It is not a valuation comp until the customer and the unit match.`,
     })
+  } else if (annual?.competition) {
+    blocks.push({ type: "note", text: "The competition section describes how the company competes. It does not name the other companies." })
   }
-  if (!annual?.competition && !annual?.rivals.length) {
+  if (!annual?.competition && !rivals.length) {
     blocks.push({ type: "note", text: "The competition discussion did not extract cleanly from this annual report. The field still has to be named before a multiple from another company is borrowed." })
   }
   return { id: "field", n: 5, title: "The field around it", blocks }
+}
+
+function sameFirm(rival: string, company: string): boolean {
+  const key = (value: string) => value.toLowerCase().replace(/\b(inc|incorporated|corp|corporation|ltd|limited|co|company|the)\b/g, "").replace(/[^a-z0-9]+/g, " ").trim()
+  const left = key(rival)
+  const right = key(company)
+  return Boolean(left) && (left === right || right.startsWith(left) || left.startsWith(right))
 }
 
 function peopleLayer(people: PeopleRead | null, url: string | null): DiveLayer {
@@ -374,7 +576,17 @@ function peopleLayer(people: PeopleRead | null, url: string | null): DiveLayer {
     blocks.push({ type: "note", text: "The proxy did not yield a clean officer list. The document is linked below. Titles, pay, and ownership belong to that filing, not to a biography written from memory." })
     return { id: "people", n: 6, title: "Who runs it", blocks }
   }
+  blocks.push({
+    type: "note",
+    text: "The proxy names the officers, the job, and a short biography. It does not say who reports to whom, so this is the roster in the filing, not a chart drawn past it.",
+  })
   if (people.groupOwnership) blocks.push({ type: "note", text: people.groupOwnership })
+  if (people.holders.length) {
+    blocks.push({
+      type: "note",
+      text: `Holders of 5% or more, from the same table: ${people.holders.map((holder) => `${holder.name} ${holder.ownership} (${holder.shares.toLocaleString("en-US")} shares)`).join("; ")}.`,
+    })
+  }
   for (const officer of people.officers) {
     const meta = [
       officer.role,
@@ -397,30 +609,50 @@ function peopleLayer(people: PeopleRead | null, url: string | null): DiveLayer {
     })
   }
   const outside = people.directors.filter((director) => !people.officers.some((officer) => officer.name === director.name))
-  if (outside.length) {
+  for (const director of outside.filter((person) => person.bio)) {
+    blocks.push({
+      type: "person",
+      name: director.name,
+      meta: [`Director since ${director.since}`, director.note].filter(Boolean).join(" · "),
+      detail: "",
+      bio: director.bio,
+    })
+  }
+  const bare = outside.filter((director) => !director.bio)
+  if (bare.length) {
     blocks.push({
       type: "table",
-      caption: "Directors who are not in the officer list",
+      caption: "Directors whose biographies did not extract",
       columns: ["Director", "Since", "Note"],
-      rows: outside.map((director) => [director.name, director.since, director.note ?? ""]),
+      rows: bare.map((director) => [director.name, director.since, director.note ?? ""]),
     })
   }
   if (url) blocks.push({ type: "note", text: "Pay is the latest year in the summary compensation table. Equity awards are grant-date values, not cash that left the building. Ownership is the proxy's beneficial-ownership count, which includes options and units that vest soon." })
   return { id: "people", n: 6, title: "Who runs it", blocks }
 }
 
-function openLayer(report: Report, annual: AnnualRead | null, people: PeopleRead | null): DiveLayer {
+function openLayer(report: Report, annual: AnnualRead | null, people: PeopleRead | null, sic: string | null, sicDescription: string | null): DiveLayer {
   const rows = annual ? totals(annual.lines) : []
-  const questions = [
-    "Listening hours, ad load, fill, and realized price are still not in the filing. The segment bridge says which book moved. It does not say which term inside the book moved.",
-    "The trading price of the debt is not in the income statement. A refinance coupon has to be taken from the bonds, and the equity outcome depends on it.",
-    "Political advertising, when it is part of the business, is every other year. The annual total does not isolate it unless a footnote does.",
-    "A cost program already in the run-rate is not a second saving. Further savings are real when a later filing shows a lower cost line.",
-  ]
-  if (!rows.length) questions.unshift("Reportable segments were not readable, so the mix shift is still an open question.")
-  if (!people?.officers.length) questions.push("The proxy did not produce an officer list on this pass. Who runs the place is still a document to read by hand.")
+  const questions: string[] = []
+  const broadcast = radioLike(sic, report.metrics.name, rows) && !satellite(report.metrics.name, sicDescription)
   const wall = report.traps.find((trap: Trap) => trap.id === "maturity-wall")
-  if (wall?.timeline) questions.unshift(`${wall.timeline.detail}`)
+  if (wall?.timeline) questions.push(wall.timeline.detail)
+  else if ((report.metrics.debt ?? 0) > (report.metrics.equity ?? 0) && (report.metrics.debt ?? 0) > 0) {
+    questions.push("The debt is larger than the equity. The coupon on a refinance is not in the income statement, and the equity outcome depends on it.")
+  }
+  if (broadcast) {
+    questions.push("Listening hours, ad load, fill, and realized price are still not in the filing. The segment bridge says which book moved. It does not say which term inside the book moved.")
+    questions.push("Political advertising, when it is part of the business, is every other year. The annual total does not isolate it unless a footnote does.")
+  }
+  const categories = annual ? categoryLines(annual) : []
+  if (categories.length) questions.push("The filing gives dollars by product and a reason for the change. It does not give units sold or a price, so volume and price stay mixed.")
+  else if (!rows.length) questions.push("Reportable segments were not readable, so the mix shift is still an open question.")
+  if (rows.length && rows.every((row) => row.ebitda == null)) questions.push("The segments show revenue and not profit, so which line earns the margin is still outside this footnote.")
+  const named = (annual?.rivals ?? []).filter((rival) => !sameFirm(rival, report.metrics.name))
+  if (annual && !named.length) questions.push("The competition section does not name the other companies. A multiple borrowed from a peer is not supported by this annual report.")
+  if (!people?.officers.length) questions.push("The proxy did not produce an officer list on this pass. Who runs the place is still a document to read by hand.")
+  else if (people.officers.some((officer) => !officer.bio && !/^former\b/i.test(officer.role))) questions.push("At least one current officer has a title and no biography from the proxy.")
+  if (!questions.length) questions.push("The documents read on this pass name the business, the mix, and the people. What they still do not separate is units and price.")
   return {
     id: "open",
     n: 7,

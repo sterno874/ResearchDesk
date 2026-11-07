@@ -11,6 +11,10 @@ export type BlotterRead = {
   horizon: HorizonId
   horizonLabel: string
   why: string
+  /** How far a deep dive has been taken. Absent until a dive is opened. */
+  depth?: number
+  /** Set when missing profile facts capped the stars, or when they were already under the cap. */
+  fileNote?: string
   readAt: string
 }
 
@@ -43,13 +47,46 @@ function wallYear(trap: Trap): number | null {
   return years.length ? years[0] : null
 }
 
+/** Facts the profile is supposed to carry. A bad number is not a gap. A missing one is. */
+export function statementGaps(report: Report): string[] {
+  const gaps: string[] = []
+  const metrics = report.metrics
+  if (/did not yield a clean business description|was not extracted/i.test(report.company)) gaps.push("a business description")
+  if (metrics.revenue == null) gaps.push("revenue")
+  if (metrics.operatingIncome == null && metrics.netIncome == null) gaps.push("a profit figure")
+  if (metrics.equity == null) gaps.push("the equity")
+  if (metrics.cfo == null && metrics.fcf == null) gaps.push("cash flow")
+  return gaps
+}
+
+function written(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? ""
+  if (items.length === 2) return `${items[0]} and ${items[1]}`
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`
+}
+
+/** One missing piece stops the stars at 4. Two stop them at 3. Three or more stop them at 2. */
+export function capStars(stars: number | null, gaps: string[]): { stars: number | null; fileNote: string } {
+  const unique = [...new Set(gaps)]
+  if (stars == null || unique.length === 0) return { stars, fileNote: "" }
+  const cap = unique.length === 1 ? 4 : unique.length === 2 ? 3 : 2
+  const limited = Math.min(stars, cap)
+  const missing = written(unique)
+  if (limited < stars) {
+    return { stars: limited, fileNote: `Missing ${missing}, so the stars stop at ${limited}.` }
+  }
+  return { stars, fileNote: `Missing ${missing}. The reader median was already at ${stars}.` }
+}
+
 export function shorthand(report: Report, now = new Date()): Omit<BlotterRead, "readAt"> {
   const scores = report.investors.map((investor) => investor.score).filter((score): score is number => score != null)
   const mid = median(scores)
   const closest = [...report.investors]
     .filter((investor) => investor.score != null)
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))[0] ?? null
-  const stars = mid == null ? null : starsFrom(mid)
+  const rawStars = mid == null ? null : starsFrom(mid)
+  const capped = capStars(rawStars, report.gaps ?? statementGaps(report))
+  const stars = capped.stars
   const warning = report.traps.find((trap) => trap.severity === "wall" || trap.severity === "serious")
 
   const wall = report.traps.find((trap) => trap.id === "maturity-wall" && trap.timeline)
@@ -89,6 +126,7 @@ export function shorthand(report: Report, now = new Date()): Omit<BlotterRead, "
     ? `${closest.name} is the closest reader at ${closest.score}. The stars use the median of the six, ${Math.round(mid)}.`
     : "The market price did not load, so the stars are withheld."
   const caution = warning ? ` The filing's own warning is already in that spread: ${warning.title}.` : ""
+  const file = capped.fileNote ? ` ${capped.fileNote}` : ""
 
   return {
     ticker: report.metrics.ticker,
@@ -98,6 +136,7 @@ export function shorthand(report: Report, now = new Date()): Omit<BlotterRead, "
     closestScore: closest?.score ?? null,
     horizon,
     horizonLabel: HORIZON_LABEL[horizon],
-    why: `${reader}${caution} ${clock}`,
+    fileNote: capped.fileNote || undefined,
+    why: `${reader}${caution} ${clock}${file}`,
   }
 }
