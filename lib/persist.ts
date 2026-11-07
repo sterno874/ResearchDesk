@@ -11,9 +11,11 @@ let ready: Promise<void> | null = null
 
 function mode(): "db" | "disk" {
   if (process.env.DATABASE_URL) return "db"
+  // A real disk, such as the Oracle VM, keeps the blotter. Fly's disk does not.
+  if (process.env.DESK_STORE === "disk") return "disk"
   if (process.env.NEXT_PHASE === "phase-production-build") return "disk"
   if (process.env.NODE_ENV === "production") {
-    throw new Error("DATABASE_URL is not set. The blotter and the filing cache need Postgres.")
+    throw new Error("DATABASE_URL is not set. Set it for Postgres, or DESK_STORE=disk when the disk is permanent.")
   }
   return "disk"
 }

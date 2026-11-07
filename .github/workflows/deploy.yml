@@ -25,7 +25,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: flyctl deploy --remote-only
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Publish to the Oracle VM
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh pack/.next
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H 129.80.137.103 >> ~/.ssh/known_hosts
+          cp -a .next/standalone/. pack/
+          cp -a .next/static pack/.next/static
+          rsync -az --delete -e "ssh -i ~/.ssh/deploy_key" pack/ ubuntu@129.80.137.103:/opt/research-desk/current/
+          ssh -i ~/.ssh/deploy_key ubuntu@129.80.137.103 "sudo systemctl restart research-desk"
