@@ -368,6 +368,7 @@ export function ReportView({ report }: { report: Report }) {
             <tr>
               <th>Year ended</th>
               <th>Revenue</th>
+              <th>Gross margin</th>
               <th>Operating margin</th>
               <th>Net income</th>
               <th>Equity</th>
@@ -378,6 +379,7 @@ export function ReportView({ report }: { report: Report }) {
               <tr key={year.end}>
                 <td>{when(year.end)}{year.fy ? ` · FY${year.fy}` : ""}</td>
                 <td>{money(year.revenue, metrics.statementCurrency ?? metrics.currency)}</td>
+                <td>{plainPct(year.grossMargin, 1)}</td>
                 <td>{plainPct(year.operatingMargin, 1)}</td>
                 <td>{money(year.netIncome, metrics.statementCurrency ?? metrics.currency)}</td>
                 <td>{money(year.equity, metrics.statementCurrency ?? metrics.currency)}</td>
