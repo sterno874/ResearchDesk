@@ -5,7 +5,7 @@ import { useEffect, useId, useState } from "react"
 const STEPS = [
   {
     title: "The blotter",
-    body: "The home page is the list of names. Collect ideas pulls recent SEC filings, posts from the value forums, and a news search. Add is for a ticker you already have in mind. Find on the desk narrows that list by ticker or company name. Filters keep filings, earnings, forums, news, or names you saved. Sort by the rank, by the latest update, or by name.",
+    body: "The home page is the list of names. Collect ideas pulls recent SEC filings, posts from the value forums, and a news search. Add is for a ticker you already have in mind. Find on the desk narrows that list by ticker or company name. Filters keep filings, earnings, forums, news, names you saved, or names with a deep-value price. That last filter shows how far the quote sits from the deep-value price. It does not change the rank. Sort by the rank, by the latest update, or by name.",
   },
   {
     title: "Five marks and a clock",

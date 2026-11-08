@@ -2,13 +2,15 @@
 
 import { useEffect, useState, type FormEvent } from "react"
 import { Pips } from "@/components/Pips"
+import { plainPct, price } from "@/lib/format"
 import type { BlotterRead } from "@/lib/rank"
 import { apiUrl } from "@/lib/remote"
 import type { CollectSummary, Idea, SourceKind } from "@/lib/types"
 
-const FILTERS: { id: "all" | "saved" | SourceKind; label: string }[] = [
+const FILTERS: { id: "all" | "saved" | "deep" | SourceKind; label: string }[] = [
   { id: "all", label: "All" },
   { id: "saved", label: "Saved" },
+  { id: "deep", label: "Deep value" },
   { id: "sec", label: "Filings" },
   { id: "earnings", label: "Earnings" },
   { id: "forum", label: "Forums" },
@@ -21,6 +23,20 @@ const SORTS: { id: "rank" | "latest" | "name"; label: string }[] = [
   { id: "latest", label: "Latest" },
   { id: "name", label: "Name" },
 ]
+
+function hasDeepGap(read: BlotterRead | undefined): read is BlotterRead & { deepGap: number } {
+  return read?.deepGap != null && Number.isFinite(read.deepGap)
+}
+
+function deepLabel(gap: number): string {
+  if (Math.abs(gap) < 0.005) return "At deep value"
+  const body = plainPct(Math.abs(gap), 0)
+  return gap > 0 ? `${body} above deep value` : `${body} under deep value`
+}
+
+function deepTitle(read: BlotterRead): string {
+  return `Quote ${price(read.price ?? null)} · deep value ${price(read.deep ?? null)}`
+}
 
 function when(iso: string): string {
   const date = new Date(iso)
@@ -69,7 +85,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
         const freshCutoff = Date.now() - 12 * 60 * 60 * 1000
         const missing = tickers.filter((ticker) => {
           const read = have[ticker]
-          return !read || Date.parse(read.readAt) < freshCutoff
+          return !read || !Object.prototype.hasOwnProperty.call(read, "deepGap") || Date.parse(read.readAt) < freshCutoff
         })
         for (let index = 0; index < missing.length; index += 4) {
           if (cancel) return
@@ -108,6 +124,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
     .filter((idea) => {
       if (filter === "all") return true
       if (filter === "saved") return Boolean(idea.favorite)
+      if (filter === "deep") return hasDeepGap(reads[idea.ticker])
       return idea.sources.some((source) => source.kind === filter)
     })
     .sort((a, b) => {
@@ -283,7 +300,11 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
                 ? "Nothing in this filter matches that."
                 : needle
                   ? "Nothing on the desk matches that."
-                  : "Nothing in this filter."}
+                  : filter === "deep"
+                    ? ranking
+                      ? "Reading the filings for a deep-value price."
+                      : "None of these names has a deep-value price on the latest read."
+                    : "Nothing in this filter."}
           </p>
         </div>
       ) : (
@@ -302,6 +323,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
                     {read ? read.horizonLabel : ranking ? "Reading" : "No read"}
                     {read?.depth && read.depth > 1 ? <span className="dive-mark">Dive {read.depth}</span> : null}
                   </div>
+                  {hasDeepGap(read) ? <div className="deep-gap" title={deepTitle(read)}>{deepLabel(read.deepGap)}</div> : null}
                   <div className="kicker">{when(lead?.at || idea.updatedAt)}</div>
                 </a>
                 <a href={`/report/${idea.ticker}`}>

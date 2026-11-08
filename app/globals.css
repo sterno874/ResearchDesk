@@ -371,6 +371,14 @@ input[type="search"]::-webkit-search-cancel-button {
 
 .horizon.none { color: var(--ink-soft); }
 
+.deep-gap {
+  margin-top: 4px;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+}
+
 .shorthand {
   display: flex;
   flex-wrap: wrap;

@@ -47,5 +47,6 @@ export function saveRead(read: BlotterRead): Promise<void> {
 
 export function isFresh(read: BlotterRead, now = Date.now()): boolean {
   const at = Date.parse(read.readAt)
-  return Number.isFinite(at) && now - at < FRESH_MS
+  if (!Number.isFinite(at) || now - at >= FRESH_MS) return false
+  return Object.prototype.hasOwnProperty.call(read, "deepGap")
 }

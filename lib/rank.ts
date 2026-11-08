@@ -16,6 +16,12 @@ export type BlotterRead = {
   depth?: number
   /** Set when missing profile facts capped the stars, or when they were already under the cap. */
   fileNote?: string
+  /** Latest quote. Absent on a read saved before this field existed. */
+  price?: number | null
+  /** Deep-value price from the memo. Absent on a read saved before this field existed. */
+  deep?: number | null
+  /** Quote versus the deep-value price, as a fraction of that price. Null when either price is missing. */
+  deepGap?: number | null
   readAt: string
 }
 
@@ -58,6 +64,12 @@ export function statementGaps(report: Report): string[] {
   if (metrics.equity == null) gaps.push("the equity")
   if (metrics.cfo == null && metrics.fcf == null) gaps.push("cash flow")
   return gaps
+}
+
+/** How far the quote sits from the deep-value price. Positive means the quote is higher. */
+export function deepGap(price: number | null, deep: number | null): number | null {
+  if (price == null || deep == null || !(deep > 0) || !Number.isFinite(price)) return null
+  return price / deep - 1
 }
 
 function written(items: string[]): string {
@@ -152,6 +164,9 @@ export function shorthand(report: Report, now = new Date()): Omit<BlotterRead, "
     horizon,
     horizonLabel: HORIZON_LABEL[horizon],
     fileNote: capped.fileNote || undefined,
+    price: report.metrics.price,
+    deep: report.memo.target.deep,
+    deepGap: deepGap(report.metrics.price, report.memo.target.deep),
     why: `${reader}${caution} ${clock}${file}`,
   }
 }
