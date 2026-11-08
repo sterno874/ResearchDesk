@@ -91,6 +91,18 @@ function kindOf(name: string): { kind: Kind; rank: number; ebitdaLabel: string |
       ebitdaLabel: shared ? "Operating income before shared costs" : "Operating income",
     }
   }
+  if (/AdjustedEBITA|EarningsBeforeInterestTaxesAndAmortization$/i.test(local) && !/Depreciation/.test(local)) {
+    return { kind: "ebitda", rank: 2, ebitdaLabel: "Adjusted EBITA" }
+  }
+  if (/(?:Earnings|EBIT).*InterestAndTaxesAdjusted$/i.test(local)) {
+    return { kind: "ebitda", rank: 2, ebitdaLabel: "Adjusted EBIT" }
+  }
+  if (local === "EarningsBeforeInterestAndTax" || local === "EarningsBeforeInterestAndTaxes") {
+    return { kind: "ebitda", rank: 0, ebitdaLabel: "EBIT" }
+  }
+  if (local === "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest") {
+    return { kind: "ebitda", rank: 0, ebitdaLabel: "Pretax income" }
+  }
   return null
 }
 
@@ -165,7 +177,12 @@ function withoutRollups(lines: SegmentLine[], parents: Set<string>): SegmentLine
         if (!closeMoney(left.revenue, right.revenue)) continue
         const longer = left.segment.length >= right.segment.length ? left : right
         const shorter = longer === left ? right : left
-        if (longer.segment.includes(shorter.segment)) drop.add(longer)
+        if (!longer.segment.includes(shorter.segment)) continue
+        if (shorter.ebitda == null && longer.ebitda != null) {
+          shorter.ebitda = longer.ebitda
+          shorter.ebitdaLabel = longer.ebitdaLabel
+        }
+        drop.add(longer)
       }
     }
   }
@@ -333,6 +350,11 @@ export function readAnnual(html: string): AnnualRead {
     const productMember = context.members.find(isProduct)
     const channelMember = context.members.find(isChannel)
     if (!segmentMember && !productMember && !channelMember) continue
+    const sliced = segmentMember && !productMember && !channelMember && context.members.some((member) => {
+      if (member === segmentMember || isSegmentMember(member)) return false
+      return localName(member.name) !== "OperatingSegmentsMember"
+    })
+    if (sliced) continue
     const value = amount(match[2], fact.scale, fact.sign)
     if (value == null) continue
     const tagged = factCurrency(units.get(fact.unitRef || ""))
