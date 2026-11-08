@@ -31,14 +31,15 @@ export function ratio(n: number | null, digits = 2): string {
 
 export function money(n: number | null, currency = "USD"): string {
   if (n == null || !Number.isFinite(n)) return "—"
-  const sign = n < 0 ? "−" : ""
   const abs = Math.abs(n)
-  const mark = currency === "USD" ? "$" : `${currency} `
-  if (abs >= 1e12) return `${sign}${mark}${(abs / 1e12).toFixed(2)}T`
-  if (abs >= 1e9) return `${sign}${mark}${(abs / 1e9).toFixed(2)}B`
-  if (abs >= 1e6) return `${sign}${mark}${(abs / 1e6).toFixed(1)}M`
-  if (abs >= 1e3) return `${sign}${mark}${(abs / 1e3).toFixed(1)}k`
-  return `${sign}${mark}${abs.toFixed(0)}`
+  const body = abs >= 1e12 ? `${(abs / 1e12).toFixed(2)}T`
+    : abs >= 1e9 ? `${(abs / 1e9).toFixed(2)}B`
+    : abs >= 1e6 ? `${(abs / 1e6).toFixed(1)}M`
+    : abs >= 1e3 ? `${(abs / 1e3).toFixed(1)}k`
+    : abs.toFixed(0)
+  const sign = n < 0 ? "−" : ""
+  if (currency === "USD") return `${sign}$${body}`
+  return `${currency} ${sign}${body}`
 }
 
 export function count(n: number | null): string {
@@ -53,11 +54,11 @@ export function count(n: number | null): string {
 
 export function price(n: number | null, currency = "USD"): string {
   if (n == null || !Number.isFinite(n)) return "—"
-  const sign = n < 0 ? "−" : ""
   const abs = Math.abs(n)
-  const mark = currency === "USD" ? "$" : `${currency} `
   const digits = abs >= 1000 ? 0 : abs >= 100 ? 2 : abs >= 1 ? 2 : 3
-  return `${sign}${mark}${abs.toFixed(digits)}`
+  const sign = n < 0 ? "−" : ""
+  if (currency === "USD") return `${sign}$${abs.toFixed(digits)}`
+  return `${currency} ${sign}${abs.toFixed(digits)}`
 }
 
 function calendarDate(iso: string): Date | null {
