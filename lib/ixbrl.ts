@@ -100,6 +100,7 @@ function kindOf(name: string): { kind: Kind; rank: number; ebitdaLabel: string |
   if (local === "EarningsBeforeInterestAndTax" || local === "EarningsBeforeInterestAndTaxes") {
     return { kind: "ebitda", rank: 0, ebitdaLabel: "EBIT" }
   }
+  if (local === "Contribution") return { kind: "ebitda", rank: 0, ebitdaLabel: "Contribution" }
   if (
     local === "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest" ||
     local === "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments"
