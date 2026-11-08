@@ -194,6 +194,87 @@ function withoutRollups(lines: SegmentLine[], parents: Set<string>): SegmentLine
   return lines.filter((line) => !drop.has(line))
 }
 
+/** Two tagged cuts of one segment are the same sales. Keep the cut that adds up to the segment. */
+function withoutDoubleCuts(lines: SegmentLine[]): SegmentLine[] {
+  const drop = new Set<SegmentLine>()
+  const groups = new Map<string, SegmentLine[]>()
+  for (const line of lines) {
+    if (!line.product || (line.revenue ?? 0) <= 0) continue
+    if (line.segment === "Category" || line.segment === "Rollup" || line.segment === "Channel") continue
+    const key = `${line.year}|${line.segment}|${line.currency}`
+    const list = groups.get(key) ?? []
+    list.push(line)
+    groups.set(key, list)
+  }
+  for (const [key, products] of groups) {
+    const [year, segment, currency] = key.split("|")
+    const parent = lines.find((line) => line.product == null && String(line.year) === year && line.segment === segment && line.currency === currency)
+    if ((parent?.revenue ?? 0) <= 0) continue
+    const sum = products.reduce((total, line) => total + (line.revenue ?? 0), 0)
+    if (sum <= parent!.revenue! * 1.5) continue
+    const keep = largestCut(products, parent!.revenue!)
+    if (!keep) continue
+    for (const line of products) if (!keep.has(line)) drop.add(line)
+  }
+  return lines.filter((line) => !drop.has(line))
+}
+
+function largestCut(products: SegmentLine[], target: number): Set<SegmentLine> | null {
+  if (products.length < 2 || products.length > 40) return null
+  const values = products.map((line) => line.revenue ?? 0)
+  const leftN = Math.floor(values.length / 2)
+  const rightN = values.length - leftN
+  const subsets = (start: number, count: number) => {
+    const out: { sum: number; mask: number; count: number }[] = []
+    for (let mask = 0; mask < (1 << count); mask++) {
+      let sum = 0
+      let bits = 0
+      for (let i = 0; i < count; i++) {
+        if ((mask & (1 << i)) === 0) continue
+        sum += values[start + i]
+        bits += 1
+      }
+      out.push({ sum, mask, count: bits })
+    }
+    out.sort((a, b) => a.sum - b.sum)
+    return out
+  }
+  const left = subsets(0, leftN)
+  const right = subsets(leftN, rightN)
+  let bestGap = Infinity
+  let bestCount = -1
+  let bestLeft = 0
+  let bestRight = 0
+  for (const item of right) {
+    const want = target - item.sum
+    let lo = 0
+    let hi = left.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (left[mid].sum < want) lo = mid + 1
+      else hi = mid
+    }
+    for (const index of [lo - 1, lo]) {
+      if (index < 0 || index >= left.length) continue
+      const sum = left[index].sum + item.sum
+      const gap = Math.abs(sum - target) / target
+      const count = left[index].count + item.count
+      if (count < 2) continue
+      if (gap < bestGap - 1e-9 || (Math.abs(gap - bestGap) <= 0.001 && count > bestCount)) {
+        bestGap = gap
+        bestCount = count
+        bestLeft = left[index].mask
+        bestRight = item.mask
+      }
+    }
+  }
+  if (bestCount < 2 || bestGap > 0.015) return null
+  const keep = new Set<SegmentLine>()
+  for (let i = 0; i < leftN; i++) if (bestLeft & (1 << i)) keep.add(products[i])
+  for (let i = 0; i < rightN; i++) if (bestRight & (1 << i)) keep.add(products[leftN + i])
+  return keep.size === products.length ? null : keep
+}
+
 function isSkipped(member: Member): boolean {
   return /Intersegment|Elimination|Corporate|Reconciling|SingleReportable|Aggregation|(^|[a-z])Total[A-Z]|TotalSegment|^(Reportable|Primary)SegmentMember$/.test(localName(member.name))
 }
@@ -417,7 +498,7 @@ export function readAnnual(html: string): AnnualRead {
     slots.set(key, slot)
   }
 
-  const lines: SegmentLine[] = withoutRollups([...slots.values()]
+  const lines: SegmentLine[] = withoutDoubleCuts(withoutRollups([...slots.values()]
     .filter((slot) => (slot.revenue ?? 0) > 0 || (slot.ebitda ?? 0) !== 0)
     .map((slot) => ({
       segment: slot.segment,
@@ -429,7 +510,7 @@ export function readAnnual(html: string): AnnualRead {
       ebitdaLabel: slot.ebitdaLabel,
       direct: slot.direct,
       sga: slot.sga,
-    })), parents)
+    })), parents))
 
   const plain = htmlToText(html)
   const item = readItem(plain)
