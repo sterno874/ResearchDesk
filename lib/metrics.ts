@@ -22,6 +22,25 @@ function yearsBetween(later: string, earlier: string): number | null {
   return span / (365.25 * 86400000)
 }
 
+function revenueYearsBefore(series: YearPoint[], years: number): number | null {
+  const latest = series[0]
+  if (!latest?.end) return null
+  const target = Date.parse(latest.end) - years * 365.25 * 86400000
+  let best: YearPoint | null = null
+  let bestGap = Infinity
+  for (const year of series.slice(1)) {
+    if (year.revenue == null) continue
+    const gap = Math.abs(Date.parse(year.end) - target)
+    if (gap < bestGap) {
+      best = year
+      bestGap = gap
+    }
+  }
+  // A fiscal year can drift a couple of weeks. A missing year is a different span, not "three years."
+  if (!best || bestGap > 200 * 86400000) return null
+  return best.revenue
+}
+
 function shareChange(points: AnnualPoint[]): number | null {
   if (points.length < 2) return null
   const now = points[0]
@@ -318,8 +337,8 @@ export function buildMetrics(input: {
   const earningsYears = incomeWindow.length
 
   const revenueNow = series[0]?.revenue ?? null
-  const revenueThen = series[Math.min(3, series.length - 1)]?.revenue ?? null
-  const revenueChange3y = series.length >= 3 ? change(revenueNow, revenueThen) : null
+  const revenueThen = revenueYearsBefore(series, 3)
+  const revenueChange3y = change(revenueNow, revenueThen)
   const oldest = series[series.length - 1]
   const span = series[0] && oldest ? yearsBetween(series[0].end, oldest.end) : null
   const revenueCagr =

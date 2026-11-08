@@ -282,18 +282,46 @@ function instantAnnual(points: SecPoint[]): AnnualPoint[] {
   return dedupe(strict.length ? strict : instants)
 }
 
-export function annualSeries(facts: CompanyFacts, names: string[], kind: "flow" | "instant"): AnnualPoint[] {
-  let best: AnnualPoint[] = []
-  let bestEnd = ""
-  for (const name of names) {
-    const annual = kind === "flow" ? flowAnnual(rawPoints(facts, name)) : instantAnnual(rawPoints(facts, name))
-    const end = annual[0]?.end ?? ""
-    if (end > bestEnd) {
-      best = annual
-      bestEnd = end
+function sameScale(point: AnnualPoint, chosen: Map<string, AnnualPoint>): boolean {
+  let nearest: AnnualPoint | null = null
+  let gap = Infinity
+  const at = Date.parse(point.end)
+  for (const other of chosen.values()) {
+    const distance = Math.abs(Date.parse(other.end) - at)
+    if (distance < gap) {
+      nearest = other
+      gap = distance
     }
   }
-  return best
+  if (!nearest?.val || !point.val) return false
+  const ratio = point.val / nearest.val
+  // A different tag for a missing year has to look like the same series, not a product line or a stub.
+  return ratio >= 0.5 && ratio <= 2
+}
+
+export function annualSeries(facts: CompanyFacts, names: string[], kind: "flow" | "instant"): AnnualPoint[] {
+  const series = names.map((name) =>
+    kind === "flow" ? flowAnnual(rawPoints(facts, name)) : instantAnnual(rawPoints(facts, name)),
+  )
+  let primary = 0
+  let bestEnd = ""
+  series.forEach((annual, index) => {
+    const end = annual[0]?.end ?? ""
+    if (end > bestEnd) {
+      bestEnd = end
+      primary = index
+    }
+  })
+  const chosen = new Map<string, AnnualPoint>()
+  for (const point of series[primary] ?? []) chosen.set(point.end, point)
+  series.forEach((annual, index) => {
+    if (index === primary) return
+    for (const point of annual) {
+      if (chosen.has(point.end) || !sameScale(point, chosen)) continue
+      chosen.set(point.end, point)
+    }
+  })
+  return [...chosen.values()].sort((a, b) => (a.end < b.end ? 1 : -1))
 }
 
 export function filingUrl(cik: string, adsh: string): string {
