@@ -4,6 +4,8 @@ export type SegmentLine = {
   segment: string
   product: string | null
   year: number
+  /** ISO currency of the tagged figures. A renminbi line is not a dollar line. */
+  currency: string
   revenue: number | null
   ebitda: number | null
   ebitdaLabel: string | null
@@ -144,6 +146,7 @@ type Slot = {
   segment: string
   product: string | null
   year: number
+  currency: string
   revenue: number | null
   revenueRank: number
   ebitda: number | null
@@ -236,7 +239,18 @@ function rivalsIn(competition: string): string[] {
   return [...found]
 }
 
+function factCurrency(measure: string | undefined): string | null {
+  if (!measure) return null
+  if (/shares/i.test(measure)) return null
+  return measure.match(/iso4217:([A-Z]{3})/)?.[1] ?? null
+}
+
 export function readAnnual(html: string): AnnualRead {
+  const units = new Map<string, string>()
+  for (const match of html.matchAll(/<xbrli:unit id="([^"]+)">([\s\S]*?)<\/xbrli:unit>/g)) {
+    const measure = [...match[2].matchAll(/<xbrli:measure>([^<]+)<\/xbrli:measure>/g)].map((item) => item[1]).join(" ")
+    units.set(match[1], measure)
+  }
   const contexts = new Map<string, { start: string; end: string; members: Member[] }>()
   for (const match of html.matchAll(/<xbrli:context id="([^"]+)">([\s\S]*?)<\/xbrli:context>/g)) {
     const body = match[2]
@@ -264,6 +278,9 @@ export function readAnnual(html: string): AnnualRead {
     if (!segmentMember && !productMember && !channelMember) continue
     const value = amount(match[2], fact.scale, fact.sign)
     if (value == null) continue
+    const tagged = factCurrency(units.get(fact.unitRef || ""))
+    if (units.has(fact.unitRef || "") && tagged == null) continue
+    const currency = tagged ?? "USD"
     const year = Number(context.end.slice(0, 4))
     const segment = segmentMember
       ? words(segmentMember.name)
@@ -276,10 +293,13 @@ export function readAnnual(html: string): AnnualRead {
         ? channelLabel(channelMember)
         : productLabel(productMember!)
     const key = `${year}|${segment}|${product ?? ""}`
-    const slot = slots.get(key) ?? {
+    const existing = slots.get(key)
+    if (existing && existing.currency !== currency) continue
+    const slot = existing ?? {
       segment,
       product,
       year,
+      currency,
       revenue: null,
       revenueRank: 0,
       ebitda: null,
@@ -309,6 +329,7 @@ export function readAnnual(html: string): AnnualRead {
       segment: slot.segment,
       product: slot.product,
       year: slot.year,
+      currency: slot.currency,
       revenue: slot.revenue,
       ebitda: slot.ebitda,
       ebitdaLabel: slot.ebitdaLabel,

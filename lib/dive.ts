@@ -50,6 +50,22 @@ const STEPS = [
 
 type Totals = SegmentLine & { margin: number | null }
 
+function books(currency: string | null | undefined): string {
+  return currency || "USD"
+}
+
+function statedIn(report: Report): string {
+  return report.metrics.statementCurrency || report.metrics.currency || "USD"
+}
+
+function sameMoney(currency: string | null | undefined, report: Report): boolean {
+  return books(currency) === statedIn(report)
+}
+
+function cash(n: number | null, currency?: string | null): string {
+  return money(n, books(currency))
+}
+
 function totals(lines: SegmentLine[]): Totals[] {
   return lines
     .filter((line) => line.product == null && line.revenue != null)
@@ -239,11 +255,11 @@ function businessLayer(report: Report, annual: AnnualRead | null, warnings: stri
     const ebitda = segments.find((row) => row.ebitdaLabel)?.ebitdaLabel ?? "Segment profit"
     blocks.push({
       type: "table",
-      caption: `${latest}, from the segment footnote`,
+      caption: sameMoney(segments[0]?.currency, report) ? `${latest}, from the segment footnote` : `${latest}, from the segment footnote, in ${books(segments[0]?.currency)}`,
       columns: ["Segment", "Revenue", "Share", ebitda, "Margin"],
       rows: segments.map((row) => {
-        const share = report.metrics.revenue ? (row.revenue ?? 0) / report.metrics.revenue : null
-        return [row.segment, money(row.revenue), plainPct(share, 0), money(row.ebitda), plainPct(row.margin, 0)]
+        const share = sameMoney(row.currency, report) && report.metrics.revenue ? (row.revenue ?? 0) / report.metrics.revenue : null
+        return [row.segment, cash(row.revenue, row.currency), plainPct(share, 0), cash(row.ebitda, row.currency), plainPct(row.margin, 0)]
       }),
     })
   }
@@ -255,11 +271,11 @@ function businessLayer(report: Report, annual: AnnualRead | null, warnings: stri
     const categoryTotal = categories.reduce((sum, line) => sum + (line.revenue ?? 0), 0)
     blocks.push({
       type: "table",
-      caption: `${latest} net sales by what is sold`,
+      caption: sameMoney(categories[0]?.currency, report) ? `${latest} net sales by what is sold` : `${latest} net sales by what is sold, in ${books(categories[0]?.currency)}`,
       columns: ["Category", "Revenue", "Share"],
       rows: categories
         .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0))
-        .map((line) => [line.product ?? "", money(line.revenue), plainPct(categoryTotal ? (line.revenue ?? 0) / categoryTotal : null, 0)]),
+        .map((line) => [line.product ?? "", cash(line.revenue, line.currency), plainPct(categoryTotal ? (line.revenue ?? 0) / categoryTotal : null, 0)]),
     })
   }
   if (rollup.length) {
@@ -269,7 +285,7 @@ function businessLayer(report: Report, annual: AnnualRead | null, warnings: stri
       columns: ["Group", "Revenue", "Cost", "Gross margin"],
       rows: rollup
         .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0))
-        .map((line) => [line.product ?? "", money(line.revenue), money(line.direct), plainPct(grossMargin(line), 1)]),
+        .map((line) => [line.product ?? "", cash(line.revenue, line.currency), cash(line.direct, line.currency), plainPct(grossMargin(line), 1)]),
     })
   }
   if (channels.length) {
@@ -280,7 +296,7 @@ function businessLayer(report: Report, annual: AnnualRead | null, warnings: stri
       columns: ["Channel", "Revenue", "Share"],
       rows: channels
         .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0))
-        .map((line) => [line.product ?? "", money(line.revenue), plainPct(channelTotal ? (line.revenue ?? 0) / channelTotal : null, 0)]),
+        .map((line) => [line.product ?? "", cash(line.revenue, line.currency), plainPct(channelTotal ? (line.revenue ?? 0) / channelTotal : null, 0)]),
     })
   }
   if (segments.some((row) => /before shared costs/i.test(row.ebitdaLabel ?? ""))) {
@@ -293,11 +309,18 @@ function businessLayer(report: Report, annual: AnnualRead | null, warnings: stri
       columns: ["Line", "Inside", "Revenue"],
       rows: nested
         .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0))
-        .map((line) => [line.product ?? "", line.segment, money(line.revenue)]),
+        .map((line) => [line.product ?? "", line.segment, cash(line.revenue, line.currency)]),
     })
   }
   if (!segments.length && !products.length) {
     blocks.push({ type: "note", text: "This annual report did not tag reportable segments in a way the reader could total. The consolidated line is all the filing gives at this level." })
+  }
+  const foreign = [...segments, ...products].find((line) => !sameMoney(line.currency, report))
+  if (foreign) {
+    blocks.push({
+      type: "note",
+      text: `These lines are in ${books(foreign.currency)}. Consolidated revenue is in ${statedIn(report)}. The filing did not give a rate, so the lines are left in their own currency and are not a share of that total.`,
+    })
   }
   if (annual?.ebitdaDefinition) blocks.push({ type: "note", text: annual.ebitdaDefinition })
   return { id: "business", n: 2, title: "What the business sells", blocks }
@@ -341,21 +364,24 @@ function segmentUnit(report: Report, annual: AnnualRead | null, rows: Totals[]):
   let text = branded
     ? "The filing splits the business by brand rather than by a counted unit."
     : "The filing splits sales by the segments it reports."
-  if (lead?.revenue != null && total) {
-    text = `${lead.segment} is ${plainPct(lead.revenue / total, 0)} of sales, ${money(lead.revenue)}.`
-    if (second?.revenue != null) text += ` ${second.segment} is ${plainPct(second.revenue / total, 0)}, ${money(second.revenue)}.`
+  if (lead?.revenue != null && total && sameMoney(lead.currency, report)) {
+    text = `${lead.segment} is ${plainPct(lead.revenue / total, 0)} of sales, ${cash(lead.revenue, lead.currency)}.`
+    if (second?.revenue != null) text += ` ${second.segment} is ${plainPct(second.revenue / total, 0)}, ${cash(second.revenue, second.currency)}.`
+  } else if (lead?.revenue != null) {
+    text += ` ${lead.segment} is ${cash(lead.revenue, lead.currency)}.`
+    if (second?.revenue != null) text += ` ${second.segment} is ${cash(second.revenue, second.currency)}.`
   }
   if (lead?.ebitda != null) {
     const label = (lead.ebitdaLabel ?? "Operating income").toLowerCase()
-    text += ` ${lead.segment} ${label} is ${money(lead.ebitda)}`
+    text += ` ${lead.segment} ${label} is ${cash(lead.ebitda, lead.currency)}`
     text += lead.margin != null ? `, ${plainPct(lead.margin, 0)} of its sales.` : "."
-    if (second?.ebitda != null) text += ` ${second.segment} is ${money(second.ebitda)}${second.margin != null ? `, ${plainPct(second.margin, 0)}` : ""}.`
+    if (second?.ebitda != null) text += ` ${second.segment} is ${cash(second.ebitda, second.currency)}${second.margin != null ? `, ${plainPct(second.margin, 0)}` : ""}.`
   }
   const channels = (annual?.lines ?? []).filter((line) => line.segment === "Channel" && line.year === latest && (line.revenue ?? 0) > 0)
   if (channels.length) {
     text += ` By channel, ${channels
       .sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0))
-      .map((line) => `${line.product} ${money(line.revenue)}`)
+      .map((line) => `${line.product} ${cash(line.revenue, line.currency)}`)
       .join(" and ")}.`
   }
   text += " The count of units sold, and the price of one unit, are not separated. A change in revenue is still volume and price together."
@@ -383,16 +409,18 @@ function categoryUnit(annual: AnnualRead, report: Report): string {
   const products = rollup.find((line) => line.product === "Products")
   const services = rollup.find((line) => line.product === "Services")
   let text = lead
-    ? `The filing splits sales by what is sold. ${lead.product} is ${plainPct(share, 0)} of that, ${money(lead.revenue)}.`
+    ? `The filing splits sales by what is sold. ${lead.product} is ${plainPct(share, 0)} of that, ${cash(lead.revenue, lead.currency)}.`
     : "The filing splits sales by what is sold."
   const productMargin = products ? grossMargin(products) : null
   const serviceMargin = services ? grossMargin(services) : null
   if (products && services && productMargin != null && serviceMargin != null) {
-    text += ` Products as a group earned a ${plainPct(productMargin, 1)} gross margin on ${money(products.revenue)}. Services earned ${plainPct(serviceMargin, 1)} on ${money(services.revenue)}. The consolidated margin is a blend of those two.`
+    text += ` Products as a group earned a ${plainPct(productMargin, 1)} gross margin on ${cash(products.revenue, products.currency)}. Services earned ${plainPct(serviceMargin, 1)} on ${cash(services.revenue, services.currency)}. The consolidated margin is a blend of those two.`
     if (serviceMargin > productMargin) text += " The services line is the richer margin."
   }
   text += " Units sold, and the price of one unit, are not in the filing. A growth rate here is still a blend of volume and price."
-  if (report.metrics.revenue && total && Math.abs(total - report.metrics.revenue) / report.metrics.revenue > 0.05) {
+  if (lead && !sameMoney(lead.currency, report)) {
+    text += ` These lines are in ${books(lead.currency)}. Consolidated revenue is in ${statedIn(report)}, and the filing did not give a rate, so this is not a share of that total.`
+  } else if (report.metrics.revenue && total && Math.abs(total - report.metrics.revenue) / report.metrics.revenue > 0.05) {
     text += " The category tags do not add up to the consolidated revenue, so the split is incomplete."
   }
   return text
@@ -435,14 +463,14 @@ function describeBridge(rows: Totals[]): { text: string; figures: { label: strin
   const pointCost = shrinkMargin != null && shrinkMargin > 0 && shrinkMargin < 1.25 ? point * shrinkMargin : null
   const label = shrinking.now?.ebitdaLabel ?? "segment profit"
   const figures = [
-    { label: `${shrinking.name} revenue`, value: `${money(shrinking.then.revenue)} → ${money(shrinking.now?.revenue ?? null)}` },
-    { label: `${shrinking.name} ${label}`, value: `${money(shrinking.then.ebitda)} → ${money(shrinking.now?.ebitda ?? null)}` },
+    { label: `${shrinking.name} revenue`, value: `${cash(shrinking.then.revenue, shrinking.then.currency)} → ${cash(shrinking.now?.revenue ?? null, shrinking.now?.currency)}` },
+    { label: `${shrinking.name} ${label}`, value: `${cash(shrinking.then.ebitda, shrinking.then.currency)} → ${cash(shrinking.now?.ebitda ?? null, shrinking.now?.currency)}` },
     { label: "Drop-through", value: plainPct(shrinkMargin, 0) },
-    { label: "One point of that revenue", value: pointCost != null ? money(pointCost) : "—" },
+    { label: "One point of that revenue", value: pointCost != null ? cash(pointCost, shrinking.then.currency) : "—" },
   ]
-  let text = `From ${prior} to ${latest}, ${shrinking.name} revenue moved by ${money(shrinking.dRev)}. ${label} moved by ${money(shrinking.dEbitda)}. `
+  let text = `From ${prior} to ${latest}, ${shrinking.name} revenue moved by ${cash(shrinking.dRev, shrinking.then.currency)}. ${label} moved by ${cash(shrinking.dEbitda, shrinking.then.currency)}. `
   if (shrinkMargin != null && shrinkMargin > 0 && shrinkMargin < 1.25) {
-    text += `The observed drop-through is ${plainPct(shrinkMargin, 0)}: one point of ${shrinking.name} revenue, ${money(point)}, took about ${money(pointCost)} of ${label} with it. That is this year's filing, not a permanent cost.`
+    text += `The observed drop-through is ${plainPct(shrinkMargin, 0)}: one point of ${shrinking.name} revenue, ${cash(point, shrinking.then.currency)}, took about ${cash(pointCost, shrinking.then.currency)} of ${label} with it. That is this year's filing, not a permanent cost.`
   } else {
     text += "The profit did not move in proportion to the revenue, so a single drop-through from this pair of years would be a costume. Use the two lines, not a blended company margin."
   }
@@ -453,12 +481,12 @@ function describeBridge(rows: Totals[]): { text: string; figures: { label: strin
     const neededRate = needed != null ? needed / growing.then.revenue : null
     const actual = growing.dRev / growing.then.revenue
     figures.push(
-      { label: `${growing.name} revenue`, value: `${money(growing.then.revenue)} → ${money(growing.now?.revenue ?? null)}` },
-      { label: `${growing.name} ${label}`, value: `${money(growing.then.ebitda)} → ${money(growing.now?.ebitda ?? null)}` },
+      { label: `${growing.name} revenue`, value: `${cash(growing.then.revenue, growing.then.currency)} → ${cash(growing.now?.revenue ?? null, growing.now?.currency)}` },
+      { label: `${growing.name} ${label}`, value: `${cash(growing.then.ebitda, growing.then.currency)} → ${cash(growing.now?.ebitda ?? null, growing.now?.currency)}` },
       { label: "Growth that fills the hole", value: plainPct(neededRate, 0) },
       { label: "Growth that happened", value: plainPct(actual, 0) },
     )
-    text += ` ${growing.name} is the line that grew. Its observed flow-through was ${plainPct(growMargin, 0)}. The ${label} given up by ${shrinking.name} was ${money(hole)}.`
+    text += ` ${growing.name} is the line that grew. Its observed flow-through was ${plainPct(growMargin, 0)}. The ${label} given up by ${shrinking.name} was ${cash(hole, shrinking.then.currency)}.`
     if (neededRate != null) {
       text += ` At that flow-through, replacing it takes ${plainPct(neededRate, 0)} growth in ${growing.name}. The line grew ${plainPct(actual, 0)}. A blended company margin would ask for a different growth rate, and it would be the wrong one, because the incremental margin of the growing line is the margin that does the offsetting.`
     }
@@ -496,11 +524,14 @@ function trendLayer(report: Report, annual: AnnualRead | null): DiveLayer {
     if (categoryYears.length && categoryNames.length) {
       blocks.push({
         type: "table",
-        caption: "Net sales by category",
+        caption: categories.some((line) => line.currency && line.currency !== "USD") ? `Net sales by category, in ${books(categories[0]?.currency)}` : "Net sales by category",
         columns: ["Category", ...categoryYears.map(String)],
         rows: categoryNames.map((name) => [
           name,
-          ...categoryYears.map((year) => money(categories.find((line) => line.product === name && line.year === year)?.revenue ?? null)),
+          ...categoryYears.map((year) => {
+            const line = categories.find((item) => item.product === name && item.year === year)
+            return cash(line?.revenue ?? null, line?.currency)
+          }),
         ]),
       })
     }
@@ -513,7 +544,10 @@ function trendLayer(report: Report, annual: AnnualRead | null): DiveLayer {
       columns: ["Segment", ...years.map(String)],
       rows: names.map((name) => [
         name,
-        ...years.map((year) => money(rows.find((row) => row.segment === name && row.year === year)?.revenue ?? null)),
+        ...years.map((year) => {
+          const row = rows.find((item) => item.segment === name && item.year === year)
+          return cash(row?.revenue ?? null, row?.currency)
+        }),
       ]),
     })
     const withProfit = rows.some((row) => row.ebitda != null)
@@ -528,7 +562,7 @@ function trendLayer(report: Report, annual: AnnualRead | null): DiveLayer {
           ...years.map((year) => {
             const row = rows.find((item) => item.segment === name && item.year === year)
             if (row?.ebitda == null) return "—"
-            return row.margin != null ? `${money(row.ebitda)} · ${plainPct(row.margin, 0)}` : money(row.ebitda)
+            return row.margin != null ? `${cash(row.ebitda, row.currency)} · ${plainPct(row.margin, 0)}` : cash(row.ebitda, row.currency)
           }),
         ]),
       })
