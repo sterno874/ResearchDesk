@@ -371,6 +371,12 @@ export function buildMetrics(input: {
       debt += financeLease
       warnings.push("Debt includes the finance lease liability. That lease is larger than the borrowings on the same statement.")
     }
+    const operatingLease = onAnchor(facts, "OperatingLeaseLiability", "instant", fiscalAnchor)
+    // Same test: a lease larger than the figure already counted cannot already be inside it.
+    if (operatingLease != null && operatingLease > debt * 1.02) {
+      debt += operatingLease
+      warnings.push("Debt includes the operating lease liability. That lease is larger than the borrowings on the same statement.")
+    }
   }
   const currentAssets = valueOnStatement(currentAssetPts, fiscalAnchor)
   const currentLiabilities = valueOnStatement(currentLiabilityPts, fiscalAnchor)
