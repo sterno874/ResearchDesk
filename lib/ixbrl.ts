@@ -372,16 +372,29 @@ function isIndex(part: string): boolean {
   return (part.match(/\b\d{1,3}\b/g)?.length ?? 0) >= 4
 }
 
+function unquoted(part: string): string {
+  let text = part.replace(/"[^"]*"/g, " ").replace(/[“][^”]*[”]/g, " ")
+  const marks = text.match(/"/g)?.length ?? 0
+  if (marks % 2 === 1) {
+    const at = text.indexOf('"')
+    text = text.slice(0, at)
+  }
+  return text.replace(/\s+/g, " ").trim()
+}
+
 function businessSentences(item: string, count: number): string {
   const parts = splitSentences(businessBody(item))
     .map(stripHeading)
     .filter((part) => {
       if (part.length < 40 || part.length > 480) return false
       if (isCharter(part) || isIndex(part)) return false
+      if (/founders' letter|not a conventional company/i.test(part)) return false
       if (/^(products|services|competition|item)\b/i.test(part)) return false
       if (/®/.test(part.slice(0, 90))) return false
       if (/fiscal year is the 52-/i.test(part)) return false
-      return /\b(is|are|was|were|designs?|manufactures?|operates?|provides?|sells?|serves?|seeks?|develops?|owns?|has|have|makes?|offers?|builds?)\b/i.test(part)
+      const bare = unquoted(part)
+      if (bare.length < 40) return false
+      return /\b(is|are|was|were|designs?|manufactures?|operates?|provides?|sells?|serves?|seeks?|develops?|owns?|has|have|makes?|offers?|builds?)\b/i.test(bare)
     })
   return parts.slice(0, count).join(" ")
 }

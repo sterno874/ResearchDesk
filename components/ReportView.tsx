@@ -185,7 +185,7 @@ export function ReportView({ report }: { report: Report }) {
     metric("Price / book", metrics.equity != null && metrics.equity <= 0 ? "Neg. equity" : metrics.pb == null ? "—" : `${ratio(metrics.pb, 1)}×`),
     metric("Free-cash-flow yield", plainPct(metrics.fcfYield, 1)),
     metric("EBIT yield", plainPct(metrics.earningsYield, 1)),
-    metric("Return on equity", plainPct(metrics.roe, 0)),
+    metric("Return on equity", metrics.roe != null && metrics.roe > 1 ? plainPct(metrics.roeAvg, 0) : plainPct(metrics.roe, 0)),
     metric("Return on capital", plainPct(metrics.roic, 0)),
     metric("Operating margin", plainPct(metrics.operatingMargin, 1)),
     metric("Debt / equity", metrics.equity != null && metrics.equity <= 0 ? "Deficit" : ratio(metrics.debtToEquity)),

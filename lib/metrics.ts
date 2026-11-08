@@ -22,7 +22,7 @@ function yearsBetween(later: string, earlier: string): number | null {
   return span / (365.25 * 86400000)
 }
 
-function revenueYearsBefore(series: YearPoint[], years: number): number | null {
+export function revenueAbout(series: YearPoint[], years: number): number | null {
   const latest = series[0]
   if (!latest?.end) return null
   const target = Date.parse(latest.end) - years * 365.25 * 86400000
@@ -41,21 +41,71 @@ function revenueYearsBefore(series: YearPoint[], years: number): number | null {
   return best.revenue
 }
 
-function shareChange(points: AnnualPoint[]): number | null {
-  if (points.length < 2) return null
-  const now = points[0]
-  if (!now.val) return null
-  const target = new Date(now.end)
-  target.setFullYear(target.getFullYear() - 5)
-  const targetIso = target.toISOString().slice(0, 10)
-  const then = points.find((point) => {
-    if (point.end > targetIso || point.val === 0) return false
-    const ratio = now.val / point.val
-    // A 25-fold jump is a different unit or a stub class, not a split this desk can see.
-    return ratio < 25 && ratio > 1 / 25
-  })
-  if (!then) return null
-  return now.val / then.val - 1
+const SPLIT_FACTORS = [3, 4, 5, 6, 8, 10, 20, 25, 50]
+
+function nearSplit(ratio: number): number | null {
+  if (!Number.isFinite(ratio) || ratio <= 0) return null
+  for (const factor of SPLIT_FACTORS) {
+    if (Math.abs(ratio - factor) / factor <= 0.025) return factor
+    if (Math.abs(ratio - 1 / factor) / (1 / factor) <= 0.025) return 1 / factor
+  }
+  return null
+}
+
+function splitName(factor: number): string {
+  return factor >= 1 ? `${Math.round(factor)}-for-1` : `1-for-${Math.round(1 / factor)}`
+}
+
+function shareChange(points: AnnualPoint[]): { change: number | null; splits: string[]; unread: string | null } {
+  const empty = { change: null, splits: [] as string[], unread: null as string | null }
+  if (points.length < 2 || !points[0]?.val) return empty
+  const latest = points[0]
+  const target = Date.parse(latest.end) - 5 * 365.25 * 86400000
+  let scale = 1
+  const splits: string[] = []
+  let best: { val: number } | null = null
+  let bestGap = Infinity
+  for (let i = 1; i < points.length; i++) {
+    if (Date.parse(points[i].end) < target - 200 * 86400000) break
+    const newer = points[i - 1].val
+    const older = points[i].val
+    if (!newer || !older) {
+      return {
+        change: null,
+        splits,
+        unread: `The share count for ${points[i].end.slice(0, 4)} is not a usable count, so the five-year change was left blank.`,
+      }
+    }
+    const ratio = newer / older
+    if (!Number.isFinite(ratio)) {
+      return {
+        change: null,
+        splits,
+        unread: `The share count for ${points[i].end.slice(0, 4)} is not a usable count, so the five-year change was left blank.`,
+      }
+    }
+    const split = nearSplit(ratio)
+    if (split) {
+      scale *= split
+      splits.push(splitName(split))
+    } else if (ratio >= 5 || ratio <= 0.2) {
+      const factor = ratio >= 1 ? ratio : 1 / ratio
+      return {
+        change: null,
+        splits,
+        unread: `The share count moved by a factor of ${factor.toFixed(1)} in ${points[i].end.slice(0, 4)}, and it is not a stock split this desk can see, so the five-year change was left blank.`,
+      }
+    }
+    const gap = Math.abs(Date.parse(points[i].end) - target)
+    if (gap < bestGap) {
+      best = { val: older * scale }
+      bestGap = gap
+    }
+  }
+  if (!best?.val || bestGap > 200 * 86400000) return { change: null, splits, unread: null }
+  const ratio = latest.val / best.val
+  if (ratio >= 25 || ratio <= 1 / 25) return { change: null, splits, unread: null }
+  return { change: latest.val / best.val - 1, splits, unread: null }
 }
 
 const STATEMENT_DAYS = 45
@@ -96,7 +146,7 @@ const DEBT_TAGS = [
   "DebtLongtermAndShorttermCombinedAmount",
 ]
 
-function readDebt(facts: CompanyFacts, anchor: string | null): { debt: number; stale: boolean } | { debt: null; stale: boolean } {
+function readDebt(facts: CompanyFacts, anchor: string | null): { debt: number; stale: boolean; filed: boolean } | { debt: null; stale: boolean; filed: boolean } {
   const longDebt = onAnchor(facts, "LongTermDebt", "instant", anchor)
   const noncurrent = onAnchor(facts, "LongTermDebtNoncurrent", "instant", anchor)
   const current = onAnchor(facts, "LongTermDebtCurrent", "instant", anchor)
@@ -145,11 +195,11 @@ function readDebt(facts: CompanyFacts, anchor: string | null): { debt: number; s
   }
 
   if (core == null) {
-    if (stale) return { debt: null, stale: true }
-    return { debt: 0, stale: false }
+    if (stale) return { debt: null, stale: true, filed: false }
+    return { debt: 0, stale: false, filed: false }
   }
 
-  if (!extrasOutside) return { debt: core, stale: false }
+  if (!extrasOutside) return { debt: core, stale: false, filed: true }
 
   let paperExtra = paper != null && paper > 0 ? paper : 0
   let shortExtra = short != null && short > 0 ? short : 0
@@ -158,7 +208,7 @@ function readDebt(facts: CompanyFacts, anchor: string | null): { debt: number; s
   let extra = paperExtra + shortExtra
   const ceiling = combined ?? obligations ?? including
   if (ceiling != null && extra > 0 && core + extra > ceiling * 1.02) extra = 0
-  return { debt: core + extra, stale: false }
+  return { debt: core + extra, stale: false, filed: true }
 }
 
 function readLiquid(facts: CompanyFacts, anchor: string | null): number | null {
@@ -198,6 +248,8 @@ export function buildMetrics(input: {
   const incomePts = annualSeries(facts, ["NetIncomeLoss"], "flow")
   const operatingPts = annualSeries(facts, ["OperatingIncomeLoss"], "flow")
   const grossPts = annualSeries(facts, ["GrossProfit"], "flow")
+  const costOfRevenuePts = annualSeries(facts, ["CostOfRevenue"], "flow")
+  const cogsPts = annualSeries(facts, ["CostOfGoodsAndServicesSold"], "flow")
   const equityPts = annualSeries(facts, [
     "StockholdersEquity",
     "StockholdersEquityAttributableToParent",
@@ -224,19 +276,32 @@ export function buildMetrics(input: {
 
   const fiscalAnchor = revenuePts[0]?.end ?? incomePts[0]?.end ?? cfoPts[0]?.end ?? null
   const debtRead = readDebt(facts, fiscalAnchor)
-  const debt = debtRead.debt
+  let debt = debtRead.debt
   const liquid = readLiquid(facts, fiscalAnchor)
 
   const revenueMap = byEnd(revenuePts)
   const incomeMap = byEnd(incomePts)
   const operatingMap = byEnd(operatingPts)
   const grossMap = byEnd(grossPts)
+  const costOfRevenueMap = byEnd(costOfRevenuePts)
+  const cogsMap = byEnd(cogsPts)
   const equityMap = byEnd(equityPts)
+  const grossAt = (end: string, revenue: number | null): { value: number | null; derived: boolean } => {
+    if (revenue == null || revenue <= 0) return { value: null, derived: false }
+    const tagged = grossMap.get(end)
+    if (tagged != null) return { value: tagged, derived: false }
+    // Cost of revenue matched the tagged gross profit wherever both were filed. Cost of goods is used only when it is most of the sales dollar, so a stray component is not turned into a margin.
+    const costOfRevenue = costOfRevenueMap.get(end)
+    if (costOfRevenue != null && costOfRevenue > 0 && costOfRevenue < revenue) return { value: revenue - costOfRevenue, derived: true }
+    const cogs = cogsMap.get(end)
+    if (cogs != null && cogs > 0 && cogs / revenue >= 0.15 && cogs / revenue <= 0.9) return { value: revenue - cogs, derived: true }
+    return { value: null, derived: false }
+  }
   const anchors = (revenuePts.length ? revenuePts : incomePts).slice(0, 8)
   const series: YearPoint[] = anchors.map((point) => {
     const revenue = revenueMap.get(point.end) ?? null
     const operatingIncome = operatingMap.get(point.end) ?? null
-    const grossProfit = grossMap.get(point.end) ?? null
+    const gross = grossAt(point.end, revenue)
     const endYear = Number(point.end.slice(0, 4))
     return {
       end: point.end,
@@ -245,7 +310,7 @@ export function buildMetrics(input: {
       netIncome: incomeMap.get(point.end) ?? null,
       operatingIncome,
       operatingMargin: revenue && operatingIncome != null ? operatingIncome / revenue : null,
-      grossMargin: revenue && grossProfit != null ? grossProfit / revenue : null,
+      grossMargin: gross.value != null && revenue ? gross.value / revenue : null,
       equity: equityMap.get(point.end) ?? null,
     }
   })
@@ -254,11 +319,25 @@ export function buildMetrics(input: {
   const revenue = stated?.revenue ?? null
   const netIncome = stated?.netIncome ?? null
   const operatingIncome = stated?.operatingIncome ?? null
-  const grossProfit = stated ? grossMap.get(stated.end) ?? null : null
+  const grossRead = stated ? grossAt(stated.end, stated.revenue) : { value: null, derived: false }
+  const grossProfit = grossRead.value
   const equityStale = Boolean(equityPts[0] && !onStatement(equityPts[0].end, fiscalAnchor))
   const equity = equityStale ? null : latest(equityPts)
   const liabilitiesStale = Boolean(liabilityPts[0] && !onStatement(liabilityPts[0].end, fiscalAnchor))
   const liabilities = liabilitiesStale ? null : latest(liabilityPts)
+  const assets = assetPts[0] && onStatement(assetPts[0].end, fiscalAnchor) ? assetPts[0].val : null
+  const deposits = onAnchor(facts, "Deposits", "instant", fiscalAnchor)
+    ?? onAnchor(facts, "DepositsInterestBearing", "instant", fiscalAnchor)
+  if (!debtRead.filed && debt === 0) {
+    const liabilityShare = liabilities != null && assets != null && assets > 0 ? liabilities / assets : null
+    if ((deposits ?? 0) > 0) {
+      debt = null
+      warnings.push("Deposits are on the balance sheet. Borrowings were not, so debt was left blank rather than treated as zero.")
+    } else if (liabilityShare != null && liabilityShare > 0.5 && liabilityShare <= 1.5) {
+      debt = null
+      warnings.push("Borrowings were not in the filing feed, and liabilities are most of the assets, so debt was left blank rather than treated as zero.")
+    }
+  }
   const currentAssets = currentAssetPts[0] && onStatement(currentAssetPts[0].end, fiscalAnchor) ? currentAssetPts[0].val : null
   const currentLiabilities = currentLiabilityPts[0] && onStatement(currentLiabilityPts[0].end, fiscalAnchor) ? currentLiabilityPts[0].val : null
   const cfo = cfoPts[0] && onStatement(cfoPts[0].end, fiscalAnchor) ? cfoPts[0].val : null
@@ -282,7 +361,7 @@ export function buildMetrics(input: {
   // Cash from operations with the spending left off is not owner earnings, and neither is relabeling the profit.
   const ownerEarnings = fcf ?? (capexStale || (capexMissing && cfo != null) ? null : netIncome)
   const enterpriseValue =
-    marketCap == null ? null : marketCap + (debt ?? 0) - (liquid ?? 0)
+    marketCap == null || debt == null || liquid == null ? null : marketCap + debt - liquid
   const pe = price != null && eps != null && eps > 0 ? price / eps : null
   const pb = marketCap != null && equity != null && equity > 0 ? marketCap / equity : null
   const fcfYield = fcf != null && marketCap ? fcf / marketCap : null
@@ -337,7 +416,7 @@ export function buildMetrics(input: {
   const earningsYears = incomeWindow.length
 
   const revenueNow = series[0]?.revenue ?? null
-  const revenueThen = revenueYearsBefore(series, 3)
+  const revenueThen = revenueAbout(series, 3)
   const revenueChange3y = change(revenueNow, revenueThen)
   const oldest = series[series.length - 1]
   const span = series[0] && oldest ? yearsBetween(series[0].end, oldest.end) : null
@@ -376,6 +455,17 @@ export function buildMetrics(input: {
   }
   if (dilutedIsNewer) {
     warnings.push("Share count is the diluted average. The year-end outstanding count is missing or older.")
+  }
+  if (grossRead.derived) {
+    warnings.push("Gross profit was not tagged. It is revenue minus the cost line on the same statement.")
+  }
+  const sharesOverTime = shareChange(sharePts.length ? sharePts : dilutedPts)
+  if (sharesOverTime.unread) warnings.push(sharesOverTime.unread)
+  else if (sharesOverTime.splits.length && sharesOverTime.change != null) {
+    const named = sharesOverTime.splits.join(" and ")
+    warnings.push(sharesOverTime.splits.length === 1
+      ? `A ${named} share split was taken out of the five-year share count.`
+      : `Share splits (${named}) were taken out of the five-year share count.`)
   }
   if (roe != null && roe > 1) {
     warnings.push("Earnings are larger than the equity. The book has been paid down, so that return is not used as the multi-year return on the business.")
@@ -436,7 +526,7 @@ export function buildMetrics(input: {
     workingCapital,
     positiveEarningsYears,
     earningsYears,
-    shareChange5y: shareChange(sharePts.length ? sharePts : dilutedPts),
+    shareChange5y: sharesOverTime.change,
     revenueChange3y,
     revenueCagr,
     grossMarginCv,

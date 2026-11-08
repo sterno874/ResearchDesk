@@ -1,5 +1,6 @@
 import { customersOwnShares, firstListing, halvedQuote, readCustomers, readOffering } from "./costume"
 import { money, multiple, plainPct, price, when } from "./format"
+import { revenueAbout } from "./metrics"
 import { annualSeries, type CompanyFacts, type Submissions } from "./sec"
 import type { Memo, Metrics, Trap } from "./types"
 
@@ -299,7 +300,7 @@ export function buildTraps(input: {
   }
 
   if (kind === "terrestrial") {
-    const earlier = metrics.series[Math.min(3, metrics.series.length - 1)]?.revenue ?? null
+    const earlier = revenueAbout(metrics.series, 3)
     const flat = revenue != null && earlier != null ? revenue / earlier - 1 : null
     traps.push({
       id: "radio-mechanism",

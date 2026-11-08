@@ -139,7 +139,7 @@ function snapFrom(company: Company, facts: CompanyFacts, quote: Awaited<ReturnTy
     cik: company.cik,
     grossMargin: metrics.grossMargin,
     operatingMargin: metrics.operatingMargin,
-    roe: metrics.roe,
+    roe: metrics.roeAvg,
     revenueChange3y: metrics.revenueChange3y,
     debtToEquity: metrics.debtToEquity,
     fcfMargin: fcfMargin(metrics),
@@ -168,7 +168,7 @@ async function inBatches<T, R>(items: T[], size: number, run: (item: T) => Promi
 
 async function peerSnaps(companies: Company[], fresh: boolean, sic: string): Promise<Snap[]> {
   if (!fresh) {
-    const cached = await readJson<Snap[]>(`field-snaps-v2-${sic}.json`, 12 * 60 * 60 * 1000)
+    const cached = await readJson<Snap[]>(`field-snaps-v3-${sic}.json`, 12 * 60 * 60 * 1000)
     const want = new Set(companies.map((company) => company.cik))
     const picked = cached?.filter((snap) => want.has(snap.cik)) ?? []
     if (want.size > 0 && picked.length === want.size) return picked
@@ -184,7 +184,7 @@ async function peerSnaps(companies: Company[], fresh: boolean, sic: string): Pro
       return null
     }
   })).filter((snap): snap is Snap => snap != null)
-  if (snaps.length) await writeEntry(`cache/field-snaps-v2-${sic}.json`, JSON.stringify(snaps)).catch(() => undefined)
+  if (snaps.length) await writeEntry(`cache/field-snaps-v3-${sic}.json`, JSON.stringify(snaps)).catch(() => undefined)
   return snaps
 }
 
@@ -218,6 +218,7 @@ function rowsFor(sector: SectorId): { key: RowKey; label: string; format: "pct" 
 
 function companyNumber(metrics: Metrics, key: RowKey): number | null {
   if (key === "fcfMargin") return fcfMargin(metrics)
+  if (key === "roe") return metrics.roeAvg
   return metrics[key]
 }
 
@@ -229,11 +230,12 @@ function formatValue(key: RowKey, format: "pct" | "ratio" | "multiple", value: n
   return `${ratio(value, 1)}×`
 }
 
-function sits(company: number | null, field: number | null, count: number): string {
+function sits(company: number | null, field: number | null, count: number, higher: boolean): string {
   if (count < MIN_FOR_MEDIAN || company == null || field == null) return "—"
   const diff = Math.abs(company - field)
   const relative = diff / Math.max(Math.abs(field), 1e-9)
   if (relative < 0.1 || diff < 0.01) return "In line"
+  if (higher) return company > field ? "Higher" : "Lower"
   return company > field ? "Above" : "Below"
 }
 
@@ -279,11 +281,12 @@ export async function loadField(input: {
         .filter((value): value is number => value != null && Number.isFinite(value))
       const mid = values.length >= MIN_FOR_MEDIAN ? median(values) : null
       const own = companyNumber(input.metrics, row.key)
+      const higher = row.key === "debtToEquity" || row.key === "pe" || row.key === "pb"
       return {
         label: row.label,
         company: formatValue(row.key, row.format, own, input.metrics.netIncome != null && input.metrics.netIncome <= 0, input.metrics.priced),
         median: formatValue(row.key, row.format, mid),
-        sits: sits(own, mid, values.length),
+        sits: sits(own, mid, values.length, higher),
       }
     })
     const names = peers.map((peer) => peer.ticker).join(", ")
@@ -292,7 +295,7 @@ export async function loadField(input: {
       label,
       peers: peers.map((peer) => ({ ticker: peer.ticker, name: peer.name })),
       rows,
-      note: `The field is the other large USD filers in ${label}: ${names}. Large means at least 5% of the biggest revenue in that SIC code, using the latest annual figure in the SEC frame. This company is left out of the median. A row stays blank when fewer than two of them report that figure. Above means the figure is higher. Higher debt, and a higher price multiple, are not a healthier business. Return on equity is the latest year, so a book that was paid down inflates it.`,
+      note: `The field is the other large USD filers in ${label}: ${names}. Large means at least 5% of the biggest revenue in that SIC code, using the latest annual figure in the SEC frame. This company is left out of the median. A row stays blank when fewer than two of them report that figure. Above means the figure is higher. Debt and the price multiples say Higher or Lower, because a higher one is not a healthier business. Return on equity is the average of recent years, and a year whose earnings were larger than the book is left out.`,
     }
   } catch {
     return emptyField(sic, label, "The industry list didn't load, so there is no field to compare.")
