@@ -1,7 +1,7 @@
 import { cache } from "react"
 import { loadAnnual, loadProxy } from "./filingdoc"
 import { readAnnual, readOverview } from "./ixbrl"
-import { readPeople } from "./people"
+import { mergePeople, readFilingPeople, readPeople } from "./people"
 import { scoreAll } from "./investors"
 import { getQuote } from "./market"
 import { buildMetrics } from "./metrics"
@@ -100,7 +100,9 @@ export const getReport = cache(async (raw: string): Promise<ReportResult> => {
       : `${company.name} has annual figures on file. A business description was not extracted on this pass.`)
   const annual = annualResult.status === "fulfilled" ? annualResult.value : null
   const parsedAnnual = annual ? readAnnual(annual.html) : null
-  const people = proxyResult.status === "fulfilled" && proxyResult.value ? readPeople(proxyResult.value.html) : null
+  const proxyPeople = proxyResult.status === "fulfilled" && proxyResult.value ? readPeople(proxyResult.value.html) : null
+  const filingPeople = annual ? readFilingPeople(annual.html) : null
+  const people = mergePeople(proxyPeople, filingPeople)
   const gaps = profileGaps({
     company: companyLine,
     metrics,

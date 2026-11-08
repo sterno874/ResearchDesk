@@ -45,7 +45,10 @@ function dollars(block: string): number[] {
 }
 
 function payParts(amounts: number[]): { salary: number | null; equityPay: number | null; incentive: number | null; totalPay: number | null } {
-  if (amounts.length >= 6) {
+  if (amounts.length > 6) {
+    return { salary: amounts[0], equityPay: null, incentive: null, totalPay: amounts[amounts.length - 1] }
+  }
+  if (amounts.length === 6) {
     return { salary: amounts[0], equityPay: amounts[2], incentive: amounts[3], totalPay: amounts[5] }
   }
   if (amounts.length >= 5) {
@@ -63,7 +66,7 @@ function yearAmounts(block: string): number[] {
   const body = (parts[0].trim() ? parts[0] : parts[1] ?? "").replace(/\(\d+\)/g, " ").replace(/[—–]/g, " 0 ")
   const signed = dollars(body)
   if (signed.length) return signed
-  return [...body.matchAll(/\b(\d{1,3}(?:,\d{3})+(?:\.\d+)?)\b/g)].map((match) => Number(match[1].replace(/,/g, "")))
+  return [...body.matchAll(/\b(0|\d{1,3}(?:,\d{3})+(?:\.\d+)?)\b/g)].map((match) => Number(match[1].replace(/,/g, "")))
 }
 
 function lastName(name: string): string {
@@ -123,10 +126,10 @@ export function readPeople(html: string): PeopleRead {
     }
   }
 
-  const payAt = text.search(/Name and Principal Position Year Salary/i)
+  const payAt = payTableAt(text)
   if (payAt >= 0) {
     const pay = text.slice(payAt, payAt + 7000)
-    const row = new RegExp(`(${PERSON})\\s+([^$\\d]{8,180}?)\\s+(20\\d\\d)\\s+([\\s\\S]{8,240}?)(?=\\s+20\\d\\d\\s+\\$|\\s+${PERSON}\\s+)`, "g")
+    const row = new RegExp(`(${PERSON})\\s+([^$\\d]{8,180}?)\\s+(20\\d\\d)\\s+([\\s\\S]{8,240}?)(?=\\s+20\\d\\d\\s+(?:\\$|[\\d—–-])|\\s+${PERSON}\\s+)`, "g")
     const seen = new Set<string>()
     for (const match of pay.matchAll(row)) {
       const name = match[1].trim()
@@ -193,11 +196,15 @@ export function readPeople(html: string): PeopleRead {
     }
   }
 
+  readCompensationRows(text, officers)
   readOfficerNarratives(text, officers)
   readRoster(text, officers)
+  readNameAgePosition(text, officers)
   readPositionBios(text, officers)
+  readServedBios(text, officers)
   readPayFollowingTitle(text, officers)
   readDirectorBlocks(text, directors, officers)
+  readDirectorRoster(text, directors, officers)
   readDirectorSince(text, directors, officers)
   readCareerBios(text, officers, directors)
   applyOwnership(text, officers)
@@ -281,13 +288,43 @@ function readCareerBios(text: string, officers: Officer[], directors: Director[]
   }
 }
 
+const DIRECTOR_NAME = `(?:Dr\\.\\s+)?[A-Z][A-Za-z'’\\-]+(?:\\s+[\\u201C"][A-Za-z'’\\-]+[\\u201D"])?(?:\\s+[A-Z]\\.)?(?:\\s+[A-Z][A-Za-z'’\\-]+){0,3}(?:\\s+(?:Jr|Sr|II|III|IV)\\.?)?`
+
+/** "Name Age Director Since … Warren “Barry” Phelps III 79 2007 Chairman of the Board Dr. Lisa Costa 62 2020 Director" */
+function readDirectorRoster(text: string, directors: Director[], officers: Officer[]) {
+  const at = text.search(/Name\s+Age\s+Director Since/i)
+  if (at < 0) return
+  const window = text.slice(at, at + 1800).split(/As previously disclosed|Class [IVX]+ Director|The following/i)[0]
+  const gap = "(?:\\s|[•●▪·]|(?:\\b(?:Chair|Independent|Audit|Compensation|Nominating|Governance)\\b\\s*))+"
+  const row = new RegExp(`(${DIRECTOR_NAME})\\s+(\\d{2})\\s+((?:19|20)\\d{2})\\s+([A-Za-z][^•●▪·\\d]{2,70}?)(?=${gap}${DIRECTOR_NAME}\\s+\\d{2}\\b|\\s+As previously|$)`, "g")
+  for (const match of window.matchAll(row)) {
+    const name = match[1].replace(/\s+/g, " ").trim().replace(/^(?:Chair|Independent|Audit|Compensation|Nominating|Governance)\s+/, "")
+    if (!name.includes(" ") || directors.some((director) => director.name === name) || NOT_A_NAME.test(name)) continue
+    const note = match[4].replace(/\s+/g, " ").trim().replace(/[,;]$/, "")
+    directors.push({ name, since: match[3], note: /^director$/i.test(note) ? null : note, bio: null })
+    const officer = officers.find((person) => person.name === name)
+    if (officer && !officer.since) officer.since = match[3]
+  }
+  const bioRow = new RegExp(`((?:[A-Z]{2,}(?:\\s+[A-Z][A-Z'’\\-]+){1,4})|${PERSON})\\s+has been a director`, "g")
+  for (const match of text.matchAll(bioRow)) {
+    const raw = match[1].trim()
+    const name = /[a-z]/.test(raw) ? raw : capsName(`${raw} `)
+    if (!name) continue
+    const director = directors.find((person) => person.name === name || lastName(person.name) === lastName(name))
+    if (!director || director.bio) continue
+    director.bio = clipBio(text.slice((match.index ?? 0) + raw.length, (match.index ?? 0) + raw.length + 700))
+  }
+}
+
 function readDirectorSince(text: string, directors: Director[], officers: Officer[]) {
-  const row = new RegExp(`(${PERSON})\\s+(.{4,80}?)\\s+Director since\\s+((?:19|20)\\d{2})\\s+Key Skills`, "g")
+  const row = new RegExp(`(${PERSON})\\s+(?:((?:Chair|Chief|President|Officer|Executive)[^.]{0,50}?)\\s+)?Director since\\s+((?:19|20)\\d{2})\\b`, "g")
   for (const match of text.matchAll(row)) {
     const name = match[1].trim()
+    const after = text.slice(match.index ?? 0, (match.index ?? 0) + 180)
+    if (!/Key Skills/i.test(after)) continue
     if (NOT_A_NAME.test(name) || directors.some((director) => director.name === name)) continue
-    if (/table of contents/i.test(match[2])) continue
-    directors.push({ name, since: match[3], note: cleanNote(match[2]), bio: null })
+    if (/table of contents/i.test(match[2] || "")) continue
+    directors.push({ name, since: match[3], note: cleanNote(match[2]?.trim() || null), bio: null })
     const officer = officers.find((person) => person.name === name)
     if (officer && !officer.since) officer.since = match[3]
   }
@@ -351,8 +388,37 @@ function readPositionBios(text: string, officers: Officer[]) {
 }
 
 /** Pay tables that put the title on the line after the latest year's numbers. */
+function payTableAt(text: string): number {
+  return text.search(/Name and Principal Position(?:\s*\([^)]{1,20}\))?\s+Year\s+Salary/i)
+}
+
+/** "Name Age Current Position(s) David Meniane 43 Chief Executive Officer Mark DiSiena…" */
+function readNameAgePosition(text: string, officers: Officer[]) {
+  const at = text.search(/Name\s+Age\s+Current Position/i)
+  if (at < 0) return
+  const window = text.slice(at, at + 1400).split(/biographical information/i)[0]
+  const row = new RegExp(`(${PERSON})\\s+(\\d{2})\\s+((?:Interim\\s+)?(?:Chief|President|Chairman)[A-Za-z ,]{0,60}?)(?=\\s+${PERSON}\\s+\\d{2}\\b|$)`, "g")
+  for (const match of window.matchAll(row)) {
+    const role = match[3].replace(/\s+/g, " ").trim().replace(/[,;]$/, "")
+    upsertOfficer(officers, match[1].trim(), role, Number(match[2]), null)
+  }
+}
+
+/** "DAVID MENIANE has served as our Chief Executive Officer…" and the same sentence in title case. */
+function readServedBios(text: string, officers: Officer[]) {
+  const row = new RegExp(`((?:[A-Z]{2,}(?:\\s+[A-Z][A-Z'’\\-]+){1,3})|${PERSON})\\s+has served as (?:our|the)\\s+((?:Interim\\s+)?(?:Chief|President)[^.]{0,120})`, "g")
+  for (const match of text.matchAll(row)) {
+    const raw = match[1].trim()
+    const name = /[a-z]/.test(raw) ? raw : capsName(`${raw} `)
+    if (!name) continue
+    const role = match[2].replace(/\s+/g, " ").trim().split(/\s+since\s+|\s+and director\b/i)[0].replace(/[,;]$/, "")
+    const start = (match.index ?? 0) + raw.length
+    upsertOfficer(officers, name, role, null, clipBio(text.slice(start, start + 750)))
+  }
+}
+
 function readPayFollowingTitle(text: string, officers: Officer[]) {
-  const at = text.search(/Name and Principal Position Year Salary/i)
+  const at = payTableAt(text)
   if (at < 0) return
   const window = text.slice(at, at + 7000)
   const row = new RegExp(
@@ -423,6 +489,171 @@ function readHolders(text: string, officers: Officer[]): Holder[] {
     holders.push({ name, shares: Number(match[2].replace(/,/g, "")), ownership })
   }
   return holders.slice(0, 6)
+}
+
+function blankOfficer(name: string, role: string, age: number | null): Officer {
+  return {
+    name,
+    age,
+    role,
+    since: null,
+    salary: null,
+    equityPay: null,
+    incentive: null,
+    totalPay: null,
+    shares: null,
+    ownership: null,
+    bio: null,
+  }
+}
+
+/** Pay rows that put the title, then the year, then bare numbers. The header wording varies. */
+function readCompensationRows(text: string, officers: Officer[]) {
+  let best = -1
+  for (const match of text.matchAll(/Summary Compensation Table/gi)) {
+    const after = text.slice(match.index ?? 0, (match.index ?? 0) + 2200)
+    if (new RegExp(`${PERSON}\\s+(?:Chair|Chief|President|Executive)`).test(after)) best = match.index ?? -1
+  }
+  if (best < 0) return
+  const window = text.slice(best, best + 8000)
+  const row = new RegExp(
+    `(${PERSON})\\s+((?:Chair(?:man|woman|person)?(?:,|\\s+and)?\\s+)?(?:President(?:,|\\s+and)\\s+)?(?:Chief|Executive Vice)[^\\d]{3,120}?)\\s+(20\\d\\d)\\s+([\\d,\\s.0—–-]{6,220}?)(?=\\s+20\\d\\d\\b|\\s+${PERSON}\\s+)`,
+    "g",
+  )
+  const seen = new Set<string>()
+  for (const match of window.matchAll(row)) {
+    const name = match[1].trim()
+    const role = match[2].replace(/\s+/g, " ").trim().replace(/[,;]$/, "")
+    if (seen.has(name) || NOT_A_NAME.test(name) || !/Chief|President|Officer|Chair/.test(role)) continue
+    seen.add(name)
+    const parts = payParts(yearAmounts(match[4]))
+    const existing = officers.find((officer) => officer.name === name)
+    if (existing) {
+      if (!existing.role) existing.role = role
+      if (existing.salary == null) existing.salary = parts.salary
+      if (existing.equityPay == null) existing.equityPay = parts.equityPay
+      if (existing.incentive == null) existing.incentive = parts.incentive
+      if (existing.totalPay == null) existing.totalPay = parts.totalPay
+    } else {
+      const created = blankOfficer(name, role, null)
+      created.salary = parts.salary
+      created.equityPay = parts.equityPay
+      created.incentive = parts.incentive
+      created.totalPay = parts.totalPay
+      officers.push(created)
+    }
+  }
+}
+
+function officeRole(role: string): boolean {
+  if (/\b(University|LLP|Retired|Law Firm)\b/i.test(role)) return false
+  return /Chief|President|Officer|Vice President|CEO|Controller|Executive Chair/.test(role)
+}
+
+function officerWindow(text: string): string {
+  for (const match of text.matchAll(/information about our executive officers/gi)) {
+    const at = (match.index ?? 0) + match[0].length
+    const after = text.slice(at, at + 100)
+    if (/\bitem\s+\d/i.test(after) || /^\s+\d{1,3}\s+(?:item|part)\b/i.test(after)) continue
+    return text.slice(at, at + 5500)
+  }
+  return ""
+}
+
+/** Officers named in the annual report, where the proxy is a brochure and the 10-K still has a table. */
+export function readFilingPeople(html: string): PeopleRead {
+  const text = htmlToText(html)
+  const officers: Officer[] = []
+  const directors: Director[] = []
+  const window = officerWindow(text)
+  if (window) {
+    const agedTitle = new RegExp(`(${PERSON})\\s+\\((\\d{2})\\)\\s+((?:Chief|Chair|President|Executive|Senior|Vice)[^()]{3,120}?)\\s+\\(((?:19|20)\\d{2})\\)`, "g")
+    for (const match of window.matchAll(agedTitle)) {
+      upsertOfficer(officers, match[1].trim(), match[3].replace(/\s+/g, " ").trim(), Number(match[2]), null)
+    }
+    const ageThenTitle = new RegExp(`(${PERSON})\\s+(\\d{2})\\s+((?:Chief|Chair|President|Executive|Senior|Vice|CEO|Principal)[^(]{3,110}?)\\s*(?:\\(\\d+\\))?\\s+((?:19|20)\\d{2})\\b`, "g")
+    for (const match of window.matchAll(ageThenTitle)) {
+      const role = match[3].replace(/\s+/g, " ").trim().replace(/[,;]$/, "")
+      if (!officeRole(role)) continue
+      upsertOfficer(officers, match[1].trim(), role.split(/\s+since\s+/i)[0], Number(match[2]), null)
+    }
+    const ageThenRole = new RegExp(`(${PERSON})\\s+(\\d{2})\\s+((?:Chief|Chair|President|Executive|Senior|Vice|CEO|Principal)[^.]{3,140}?)(?=\\s+${PERSON}\\s+\\d{2}\\b|\\s+${PERSON}\\.)`, "g")
+    for (const match of window.matchAll(ageThenRole)) {
+      const role = match[3].replace(/\s+/g, " ").trim().replace(/[,;]$/, "")
+      if (!officeRole(role)) continue
+      upsertOfficer(officers, match[1].trim(), role.split(/\s+since\s+/i)[0], Number(match[2]), null)
+    }
+    const experience = new RegExp(`(${PERSON})\\s+((?:Executive Vice President|Senior Vice President|Chief|President)[^.]{3,140}?)[.,]\\s+[\\s\\S]{15,700}?\\b(?:19|20)\\d{2}\\s+(\\d{2})\\s+(?=${PERSON}\\b)`, "g")
+    for (const match of window.matchAll(experience)) {
+      const role = match[2].replace(/\s+/g, " ").trim().replace(/[,;]$/, "").split(/\s+since\s+/i)[0]
+      if (!officeRole(role)) continue
+      upsertOfficer(officers, match[1].trim(), role, Number(match[3]), null)
+    }
+  }
+  readForeignBoard(text, officers, directors)
+  officers.sort((a, b) => rankOfficer(a) - rankOfficer(b))
+  return {
+    officers: officers.slice(0, 12),
+    directors: directors.slice(0, 16),
+    holders: [],
+    groupOwnership: null,
+  }
+}
+
+const INITIALS = `(?:[A-Z]\\.){1,3}\\s+[A-Z][A-Za-z'’\\-]+`
+
+function readForeignBoard(text: string, officers: Officer[], directors: Director[]) {
+  const at = text.search(/Board of Directors\s+Name\s+Age\s+Position/i)
+  if (at < 0) return
+  const window = text.slice(at, at + 3200).split(/Executive Officers\s+Name\s+Position|Senior Management/i)[0]
+  const filingName = `(?:Sir\\s+${PERSON}|(?:[A-Z]\\.\\s+)?${INITIALS}|(?:[A-Z]\\.\\s+)?${PERSON})(?:\\s*\\(\\d+\\))?`
+  const row = new RegExp(`(${filingName})\\s+(\\d{2})(?:-\\d{2})?\\s+([^\\d]{3,90}?)\\s+((?:19|20)\\d{2})\\s+(\\d{1,2})\\b`, "g")
+  for (const match of window.matchAll(row)) {
+    const name = match[1].replace(/\s*\(\d+\)\s*$/, "").replace(/\s+/g, " ").trim()
+    const role = match[3].replace(/\s+/g, " ").trim().replace(/[;,]$/, "")
+    if (NOT_A_NAME.test(name) || directors.some((director) => director.name === name)) continue
+    const age = Number(match[2])
+    directors.push({
+      name,
+      since: match[4],
+      note: /independent/i.test(role) ? "Independent director" : role,
+      bio: null,
+    })
+    if (/Chief|President|Chairman|Chair/.test(role)) upsertOfficer(officers, name, role, age, null)
+  }
+}
+
+export function mergePeople(first: PeopleRead | null, second: PeopleRead | null): PeopleRead | null {
+  if (!first?.officers.length && !first?.directors.length) return second ?? first
+  if (!second?.officers.length && !second?.directors.length) return first
+  if (!first) return second
+  if (!second) return first
+  const officers = [...first.officers]
+  for (const officer of second.officers) {
+    const existing = officers.find((item) => item.name === officer.name)
+    if (!existing) {
+      officers.push(officer)
+      continue
+    }
+    if (!existing.role) existing.role = officer.role
+    if (existing.age == null) existing.age = officer.age
+    if (!existing.bio && officer.bio) existing.bio = officer.bio
+    if (existing.salary == null) existing.salary = officer.salary
+    if (existing.equityPay == null) existing.equityPay = officer.equityPay
+    if (existing.incentive == null) existing.incentive = officer.incentive
+    if (existing.totalPay == null) existing.totalPay = officer.totalPay
+  }
+  const directors = [...first.directors]
+  for (const director of second.directors) {
+    if (!directors.some((item) => item.name === director.name)) directors.push(director)
+  }
+  officers.sort((a, b) => rankOfficer(a) - rankOfficer(b))
+  return {
+    officers: officers.slice(0, 12),
+    directors: directors.slice(0, 16),
+    holders: first.holders.length ? first.holders : second.holders,
+    groupOwnership: first.groupOwnership ?? second.groupOwnership,
+  }
 }
 
 function readGroup(text: string): string | null {

@@ -1,4 +1,4 @@
-import { htmlToText, sentenceAround, sentences } from "./plain"
+import { htmlToText, sentenceAround, sentences, splitSentences } from "./plain"
 
 export type SegmentLine = {
   segment: string
@@ -41,11 +41,18 @@ function words(member: string): string {
     .replace(/([a-z])and(?=[A-Z])/g, "$1 and ")
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
-    .replace(/\bNon\b/g, "excluding")
+    .replace(/\bNon (GAAP|Interest|Operating|Cash|Current)\b/g, "excluding $1")
     .replace(/\bAnd\b/g, "and")
     .replace(/ excluding (\w+)/, (_, word: string) => `, excluding ${word.toLowerCase()}`)
     .replace(/and([A-Z])/g, "and $1")
     .replace(/^I([A-Z])/, "i$1")
+    .replace(/\bi Phone\b/g, "iPhone")
+    .replace(/\bi Pad\b/g, "iPad")
+    .replace(/\bThree Six Five\b/g, "365")
+    .replace(/\bLinked In\b/g, "LinkedIn")
+    .replace(/\bYou Tube\b/g, "YouTube")
+    .replace(/\bPay Pal\b/g, "PayPal")
+    .replace(/\bGit Hub\b/g, "GitHub")
     .replace(/\s+/g, " ")
     .trim()
 }
@@ -113,7 +120,7 @@ function channelLabel(member: Member): string {
 }
 
 function isSkipped(member: Member): boolean {
-  return /Intersegment|Elimination|Corporate|Reconciling/.test(localName(member.name))
+  return /Intersegment|Elimination|Corporate|Reconciling|SingleReportable|^(Reportable|Primary)SegmentMember$/.test(localName(member.name))
 }
 
 function isProduct(member: Member): boolean {
@@ -169,12 +176,19 @@ function clipItem(rest: string): string {
 }
 
 function readItem(plain: string): string {
-  const pattern = /item\s+1\.\s+business/gi
+  const pattern = /item\s+1\.?\s+business|item\s+4\.?\s+information on the company/gi
   let bestAt = -1
   let bestScore = 0
   for (const match of plain.matchAll(pattern)) {
-    const after = plain.slice((match.index ?? 0) + match[0].length, (match.index ?? 0) + match[0].length + 320)
-    if (/^\s*[–—\-."”]/.test(after)) continue
+    const at = match.index ?? 0
+    const before = plain.slice(Math.max(0, at - 60), at)
+    const after = plain.slice(at + match[0].length, at + match[0].length + 320)
+    if (/\b(see|refer|under|caption|discussion|described|included|pursuant)\b/i.test(before)) continue
+    if (/^\s*[.·]\s*\d/.test(after)) continue
+    if (/^\s*[–—\-]/.test(after)) continue
+    if (/^\s*["“”']?\s*above\b/i.test(after)) continue
+    if (/^\s*[”"']/.test(after)) continue
+    if (/^\s*of this report\b/i.test(after)) continue
     if (/^\s*(item|part|see|under)\b/i.test(after)) continue
     if (looksLikeContents(after)) continue
     const score = (after.match(/[a-z]/g) || []).length
@@ -184,6 +198,19 @@ function readItem(plain: string): string {
     }
   }
   if (bestAt >= 0 && bestScore >= 40) return clipItem(plain.slice(bestAt))
+
+  const token = "[A-Z][A-Za-z0-9&'’\\-]*[A-Za-z0-9]|[a-z]+[A-Z][A-Za-z0-9&'’\\-]*[A-Za-z0-9]"
+  const named = new RegExp(
+    `\\b(?!(?:Business|General|Item|Overview|Part|Table|Inc|Corp|Ltd|LLC|Company)\\b)((?:The Company|(?:${token})(?:\\s+(?!(?:Business|General|Item|Overview)\\b)(?:${token})){0,4})\\.?\\s+is an?\\s+[^.]{40,280}\\.)`,
+    "g",
+  )
+  for (const match of plain.matchAll(named)) {
+    const at = match.index ?? 0
+    if (at < 1500 || at > 120000) continue
+    const before = plain.slice(Math.max(0, at - 80), at)
+    if (/table of contents|item\s+1a/i.test(before)) continue
+    return clipItem(plain.slice(at))
+  }
 
   const narrative = /\boverview\s+(we\s+(?:are|design|operate|provide|develop|manufacture|own|sell|believe)\b)/gi
   for (const match of plain.matchAll(narrative)) {
@@ -311,15 +338,20 @@ export function readAnnual(html: string): AnnualRead {
 }
 
 function businessSentences(item: string, count: number): string {
-  const parts = item
-    .split(/(?<=\.)\s+/)
-    .map((part) => part.replace(/^(company background|business overview|overview)\s+/i, "").replace(/\s+/g, " ").trim())
+  const parts = splitSentences(item)
+    .map((part) => part
+      .replace(/^(?:(?:item\s+1|business|company background|business overview|overview|our history and structure|about the company)\s+)+/i, "")
+      .replace(/^(?:GENERAL\s+)+/, "")
+      .replace(/^(?:[A-Z]{2,}\s+)+(?=(?!Inc\b|Corp\b|Co\b|Ltd\b|LLC\b|Company\b|Group\b|Holdings\b|Limited\b|Corporation\b|Motors\b)[A-Z][a-z])/, "")
+      .replace(/^general\s+(?!motors\b)/i, "")
+      .replace(/\s+/g, " ")
+      .trim())
     .filter((part) => {
-      if (part.length < 40 || part.length > 420) return false
+      if (part.length < 40 || part.length > 480) return false
       if (/^(products|services|competition|item)\b/i.test(part)) return false
       if (/®/.test(part.slice(0, 90))) return false
       if (/fiscal year is the 52-/i.test(part)) return false
-      return /\b(is|are|was|were|designs|manufactures|operates|provides|sells|develops|owns|has|have|makes|offers)\b/i.test(part)
+      return /\b(is|are|was|were|designs|manufactures|operates|provides|sells|serves|seeks|develops|owns|has|have|makes|offers)\b/i.test(part)
     })
   return parts.slice(0, count).join(" ")
 }
@@ -328,8 +360,7 @@ function categoryDrivers(plain: string): string[] {
   const at = plain.search(/net sales by category/i)
   if (at < 0) return []
   const window = plain.slice(at, at + 2400)
-  return window
-    .split(/(?<=\.)\s+/)
+  return splitSentences(window)
     .map((part) => part.replace(/\s+/g, " ").trim().replace(/^(\S+)\s+\1\b/i, "$1"))
     .filter((part) => /net sales (increased|decreased|were|was)/i.test(part) && part.length < 320)
     .slice(0, 6)

@@ -25,11 +25,12 @@ function recoveredMultiple(normalMargin: number | null, debtToEquity: number | n
 
 function qualityMultiple(metrics: Metrics): number {
   const roic = metrics.roic ?? 0
-  const gross = metrics.grossMargin ?? 0
+  const gross = metrics.grossMargin
+  const grossClears = (floor: number) => gross == null || gross >= floor
   const levered = metrics.debtToEquity != null && metrics.debtToEquity > 1.5
   let multiple = 9
-  if (roic >= 0.2 && gross >= 0.35 && !levered) multiple = 17
-  else if (roic >= 0.15 && gross >= 0.22 && !levered) multiple = 14
+  if (roic >= 0.2 && grossClears(0.35) && !levered) multiple = 17
+  else if (roic >= 0.15 && grossClears(0.22) && !levered) multiple = 14
   else if (roic >= 0.1) multiple = 11
   if (levered) multiple = Math.min(multiple, 10)
   return multiple

@@ -1,7 +1,7 @@
 import { money, plainPct } from "./format"
 import { companySic, loadAnnual, loadProxy } from "./filingdoc"
 import { readAnnual, type AnnualRead, type SegmentLine } from "./ixbrl"
-import { readPeople, type PeopleRead } from "./people"
+import { mergePeople, readFilingPeople, readPeople, type PeopleRead } from "./people"
 import { shorthand } from "./rank"
 import { getReport } from "./report"
 import { saveRead } from "./reads"
@@ -87,6 +87,7 @@ export async function getDive(raw: string, depth: number): Promise<{ ok: true; d
   let annual: AnnualRead | null = null
   let annualUrl: string | null = null
   let annualFiled = ""
+  let filingPeople: PeopleRead | null = null
   let proxy: PeopleRead | null = null
   let proxyUrl: string | null = null
   let proxyFiled = ""
@@ -98,6 +99,7 @@ export async function getDive(raw: string, depth: number): Promise<{ ok: true; d
       if (!doc) warnings.push("No annual report was in the recent filing list.")
       else {
         annual = readAnnual(doc.html)
+        filingPeople = readFilingPeople(doc.html)
         annualUrl = doc.url
         annualFiled = doc.filed
       }
@@ -108,14 +110,17 @@ export async function getDive(raw: string, depth: number): Promise<{ ok: true; d
   if (level >= 6) {
     try {
       const doc = await loadProxy(report.metrics.cik)
-      if (!doc) warnings.push("No proxy was in the recent filing list.")
-      else {
-        proxy = readPeople(doc.html)
+      if (!doc) {
+        warnings.push("No proxy was in the recent filing list.")
+        proxy = filingPeople
+      } else {
+        proxy = mergePeople(readPeople(doc.html), filingPeople)
         proxyUrl = doc.url
         proxyFiled = doc.filed
       }
     } catch (error) {
       warnings.push(error instanceof Error ? error.message : "The proxy didn't load.")
+      proxy = filingPeople
     }
   }
 
@@ -578,7 +583,7 @@ function peopleLayer(people: PeopleRead | null, url: string | null): DiveLayer {
   }
   blocks.push({
     type: "note",
-    text: "The proxy names the officers, the job, and a short biography. It does not say who reports to whom, so this is the roster in the filing, not a chart drawn past it.",
+    text: "The filing names the officers, the job, and a short biography when it printed one. It does not say who reports to whom, so this is the roster in the document, not a chart drawn past it.",
   })
   if (people.groupOwnership) blocks.push({ type: "note", text: people.groupOwnership })
   if (people.holders.length) {

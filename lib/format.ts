@@ -50,15 +50,21 @@ export function price(n: number | null, currency = "USD"): string {
   return `${sign}${mark}${abs.toFixed(digits)}`
 }
 
+function calendarDate(iso: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)
+  if (!match) return null
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+}
+
 export function when(iso: string | null): string {
   if (!iso) return "—"
-  const date = new Date(iso)
+  const date = calendarDate(iso) ?? new Date(iso)
   if (Number.isNaN(date.getTime())) return iso.slice(0, 10)
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
 }
 
 export function monthYear(iso: string): string {
-  const date = new Date(iso)
+  const date = calendarDate(iso) ?? new Date(iso)
   if (Number.isNaN(date.getTime())) return iso
   return date.toLocaleDateString("en-US", { month: "short", year: "numeric" })
 }

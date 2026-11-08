@@ -33,6 +33,124 @@ function shareChange(points: AnnualPoint[]): number | null {
   return now.val / then.val - 1
 }
 
+const STATEMENT_DAYS = 45
+const DAY_MS = 86400000
+
+function onStatement(end: string, anchor: string | null): boolean {
+  if (!anchor) return true
+  const gap = Math.abs(Date.parse(end) - Date.parse(anchor))
+  return Number.isFinite(gap) && gap <= STATEMENT_DAYS * DAY_MS
+}
+
+function dated(facts: CompanyFacts, name: string, kind: "flow" | "instant"): AnnualPoint | null {
+  return annualSeries(facts, [name], kind)[0] ?? null
+}
+
+function onAnchor(facts: CompanyFacts, name: string, kind: "flow" | "instant", anchor: string | null): number | null {
+  const point = dated(facts, name, kind)
+  if (!point || !onStatement(point.end, anchor)) return null
+  return point.val
+}
+
+function closeTo(a: number, b: number): boolean {
+  const scale = Math.max(Math.abs(a), Math.abs(b))
+  if (scale === 0) return true
+  return Math.abs(a - b) / scale < 0.02
+}
+
+const DEBT_TAGS = [
+  "LongTermDebt",
+  "LongTermDebtNoncurrent",
+  "LongTermDebtCurrent",
+  "DebtCurrent",
+  "ShortTermBorrowings",
+  "CommercialPaper",
+  "DebtAndCapitalLeaseObligations",
+  "LongTermDebtAndCapitalLeaseObligations",
+  "LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities",
+  "DebtLongtermAndShorttermCombinedAmount",
+]
+
+function readDebt(facts: CompanyFacts, anchor: string | null): { debt: number; stale: boolean } | { debt: null; stale: boolean } {
+  const longDebt = onAnchor(facts, "LongTermDebt", "instant", anchor)
+  const noncurrent = onAnchor(facts, "LongTermDebtNoncurrent", "instant", anchor)
+  const current = onAnchor(facts, "LongTermDebtCurrent", "instant", anchor)
+  const debtCurrent = onAnchor(facts, "DebtCurrent", "instant", anchor)
+  const paper = onAnchor(facts, "CommercialPaper", "instant", anchor)
+  const short = onAnchor(facts, "ShortTermBorrowings", "instant", anchor)
+  const including = onAnchor(facts, "LongTermDebtAndCapitalLeaseObligationsIncludingCurrentMaturities", "instant", anchor)
+  const combined = onAnchor(facts, "DebtLongtermAndShorttermCombinedAmount", "instant", anchor)
+  const obligations = onAnchor(facts, "DebtAndCapitalLeaseObligations", "instant", anchor)
+  const noncurrentLeases = onAnchor(facts, "LongTermDebtAndCapitalLeaseObligations", "instant", anchor)
+  const currentPortion = current ?? debtCurrent
+
+  let core: number | null = null
+  let extrasOutside = true
+  if (longDebt != null) {
+    core = longDebt
+    const pieces = (noncurrent ?? 0) + (currentPortion ?? 0)
+    const withExtras = pieces + Math.max(short ?? 0, 0) + Math.max(paper ?? 0, 0)
+    if (pieces > 0 && closeTo(withExtras, longDebt)) extrasOutside = false
+  } else if (noncurrent != null && currentPortion != null) {
+    core = noncurrent + currentPortion
+  } else if (including != null) {
+    core = including
+    extrasOutside = false
+  } else if (combined != null) {
+    core = combined
+    extrasOutside = false
+  } else if (obligations != null) {
+    core = obligations
+    extrasOutside = false
+  } else if (noncurrentLeases != null && currentPortion != null) {
+    core = noncurrentLeases + currentPortion
+  } else if (noncurrent != null) {
+    core = noncurrent
+  } else if (noncurrentLeases != null) {
+    core = noncurrentLeases
+  } else if (currentPortion != null) {
+    core = currentPortion
+  }
+
+  let stale = false
+  for (const name of DEBT_TAGS) {
+    const point = dated(facts, name, "instant")
+    if (!point || onStatement(point.end, anchor)) continue
+    if (point.val !== 0) stale = true
+  }
+
+  if (core == null) {
+    if (stale) return { debt: null, stale: true }
+    return { debt: 0, stale: false }
+  }
+
+  if (!extrasOutside) return { debt: core, stale: false }
+
+  let paperExtra = paper != null && paper > 0 ? paper : 0
+  let shortExtra = short != null && short > 0 ? short : 0
+  if (currentPortion != null && currentPortion > 0 && shortExtra > 0 && closeTo(shortExtra, currentPortion)) shortExtra = 0
+  if (paperExtra > 0 && shortExtra > 0 && closeTo(paperExtra, shortExtra)) shortExtra = 0
+  let extra = paperExtra + shortExtra
+  const ceiling = combined ?? obligations ?? including
+  if (ceiling != null && extra > 0 && core + extra > ceiling * 1.02) extra = 0
+  return { debt: core + extra, stale: false }
+}
+
+function readLiquid(facts: CompanyFacts, anchor: string | null): number | null {
+  const combined = onAnchor(facts, "CashCashEquivalentsAndShortTermInvestments", "instant", anchor)
+  if (combined != null) return combined
+  const cash = onAnchor(facts, "CashAndCashEquivalentsAtCarryingValue", "instant", anchor)
+    ?? onAnchor(facts, "Cash", "instant", anchor)
+  const securities = onAnchor(facts, "ShortTermInvestments", "instant", anchor)
+    ?? onAnchor(facts, "MarketableSecuritiesCurrent", "instant", anchor)
+    ?? onAnchor(facts, "AvailableForSaleSecuritiesCurrent", "instant", anchor)
+    ?? onAnchor(facts, "AvailableForSaleSecuritiesDebtMaturitiesWithinOneYearFairValue", "instant", anchor)
+  if (cash != null) return cash + Math.max(securities ?? 0, 0)
+  const restricted = onAnchor(facts, "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents", "instant", anchor)
+  if (restricted == null && securities == null) return null
+  return (restricted ?? 0) + Math.max(securities ?? 0, 0)
+}
+
 export function buildMetrics(input: {
   company: Company
   facts: CompanyFacts
@@ -66,6 +184,7 @@ export function buildMetrics(input: {
   const capexPts = annualSeries(facts, [
     "PaymentsToAcquirePropertyPlantAndEquipment",
     "PaymentsToAcquireProductiveAssets",
+    "PaymentsToAcquireOtherProductiveAssets",
   ], "flow")
   const epsPts = annualSeries(facts, ["EarningsPerShareDiluted"], "flow")
   const sharePts = annualSeries(facts, [
@@ -76,19 +195,10 @@ export function buildMetrics(input: {
   const dpsPts = annualSeries(facts, ["CommonStockDividendsPerShareDeclared"], "flow")
   const dividendPts = annualSeries(facts, ["PaymentsOfDividends", "PaymentsOfDividendsCommonStock"], "flow")
 
-  const longDebt = latest(annualSeries(facts, ["LongTermDebt"], "instant"))
-  const debtNoncurrent = latest(annualSeries(facts, ["LongTermDebtNoncurrent"], "instant"))
-  const debtCurrent = latest(annualSeries(facts, ["LongTermDebtCurrent"], "instant"))
-  const shortBorrow = latest(annualSeries(facts, ["ShortTermBorrowings"], "instant"))
-  const paper = latest(annualSeries(facts, ["CommercialPaper"], "instant"))
-  const debt =
-    debtNoncurrent != null || debtCurrent != null || shortBorrow != null || paper != null
-      ? (debtNoncurrent ?? 0) + (debtCurrent ?? 0) + (shortBorrow ?? 0) + (paper ?? 0)
-      : longDebt
-
-  const cash = latest(annualSeries(facts, ["CashAndCashEquivalentsAtCarryingValue", "Cash"], "instant"))
-  const cashAndInvestments = latest(annualSeries(facts, ["CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents", "CashCashEquivalentsAndShortTermInvestments"], "instant"))
-  const liquid = cashAndInvestments ?? cash
+  const fiscalAnchor = revenuePts[0]?.end ?? incomePts[0]?.end ?? cfoPts[0]?.end ?? null
+  const debtRead = readDebt(facts, fiscalAnchor)
+  const debt = debtRead.debt
+  const liquid = readLiquid(facts, fiscalAnchor)
 
   const revenueMap = byEnd(revenuePts)
   const incomeMap = byEnd(incomePts)
@@ -113,33 +223,33 @@ export function buildMetrics(input: {
     }
   })
 
-  const revenue = series.find((year) => year.revenue != null)?.revenue ?? latest(revenuePts)
-  const netIncome = series.find((year) => year.netIncome != null)?.netIncome ?? latest(incomePts)
-  const operatingIncome = series.find((year) => year.operatingIncome != null)?.operatingIncome ?? latest(operatingPts)
-  const grossProfit = latest(grossPts)
-  const fiscalAnchor = revenuePts[0]?.end ?? incomePts[0]?.end ?? null
-  const equityStale = Boolean(
-    fiscalAnchor && equityPts[0] && Date.parse(fiscalAnchor) - Date.parse(equityPts[0].end) > 500 * 86400000,
-  )
+  const stated = series.find((year) => year.end === fiscalAnchor) ?? series.find((year) => year.revenue != null) ?? null
+  const revenue = stated?.revenue ?? null
+  const netIncome = stated?.netIncome ?? null
+  const operatingIncome = stated?.operatingIncome ?? null
+  const grossProfit = stated ? grossMap.get(stated.end) ?? null : null
+  const equityStale = Boolean(equityPts[0] && !onStatement(equityPts[0].end, fiscalAnchor))
   const equity = equityStale ? null : latest(equityPts)
-  const liabilities = latest(liabilityPts)
-  const currentAssets = latest(currentAssetPts)
-  const currentLiabilities = latest(currentLiabilityPts)
-  const cfo = latest(cfoPts)
-  const capex = latest(capexPts)
-  const eps = latest(epsPts)
-  const dilutedIsNewer = (dilutedPts[0]?.end ?? "") > (sharePts[0]?.end ?? "")
-  const shares = dilutedIsNewer ? latest(dilutedPts) : latest(sharePts) ?? latest(dilutedPts)
-  const dpsFresh = Boolean(fiscalAnchor && dpsPts[0] && Date.parse(fiscalAnchor) - Date.parse(dpsPts[0].end) < 500 * 86400000)
-  const dividendFresh = Boolean(fiscalAnchor && dividendPts[0] && Date.parse(fiscalAnchor) - Date.parse(dividendPts[0].end) < 500 * 86400000)
-  const dps = dpsFresh ? latest(dpsPts) : null
-  const dividends = dividendFresh ? latest(dividendPts) : null
+  const liabilitiesStale = Boolean(liabilityPts[0] && !onStatement(liabilityPts[0].end, fiscalAnchor))
+  const liabilities = liabilitiesStale ? null : latest(liabilityPts)
+  const currentAssets = currentAssetPts[0] && onStatement(currentAssetPts[0].end, fiscalAnchor) ? currentAssetPts[0].val : null
+  const currentLiabilities = currentLiabilityPts[0] && onStatement(currentLiabilityPts[0].end, fiscalAnchor) ? currentLiabilityPts[0].val : null
+  const cfo = cfoPts[0] && onStatement(cfoPts[0].end, fiscalAnchor) ? cfoPts[0].val : null
+  const capexStale = Boolean(capexPts[0] && !onStatement(capexPts[0].end, fiscalAnchor))
+  const capex = capexPts[0] && onStatement(capexPts[0].end, fiscalAnchor) ? Math.abs(capexPts[0].val) : capexPts.length ? null : 0
+  const eps = epsPts[0] && onStatement(epsPts[0].end, fiscalAnchor) ? epsPts[0].val : null
+  const shareOnStatement = sharePts[0] && onStatement(sharePts[0].end, fiscalAnchor) ? sharePts[0].val : null
+  const dilutedOnStatement = dilutedPts[0] && onStatement(dilutedPts[0].end, fiscalAnchor) ? dilutedPts[0].val : null
+  const dilutedIsNewer = shareOnStatement == null && dilutedOnStatement != null
+  const shares = shareOnStatement ?? dilutedOnStatement
+  const dps = dpsPts[0] && onStatement(dpsPts[0].end, fiscalAnchor) ? dpsPts[0].val : null
+  const dividends = dividendPts[0] && onStatement(dividendPts[0].end, fiscalAnchor) ? dividendPts[0].val : null
 
   const price = quote?.price ?? null
   const currency = quote?.currency ?? "USD"
   const marketCap = price != null && shares ? price * shares : null
-  const fcf = cfo == null ? null : cfo - Math.abs(capex ?? 0)
-  const ownerEarnings = fcf ?? netIncome
+  const fcf = cfo == null || capex == null ? null : cfo - capex
+  const ownerEarnings = fcf ?? (capexStale ? null : netIncome)
   const enterpriseValue =
     marketCap == null ? null : marketCap + (debt ?? 0) - (liquid ?? 0)
   const pe = price != null && eps != null && eps > 0 ? price / eps : null
@@ -219,10 +329,18 @@ export function buildMetrics(input: {
   if (price != null && shares != null && revenue != null && shares < 1e7 && price * shares < revenue * 0.02) {
     warnings.push("The share count looks too small beside revenue. Per-share figures and market cap may be scaled oddly in the filing.")
   }
-  if (equityStale) {
-    warnings.push("Equity in the XBRL feed is much older than the income statement, so book value is left blank rather than taken from a stale line.")
+  const dropped = [
+    debtRead.stale ? "debt" : null,
+    equityStale ? "equity" : null,
+    liabilitiesStale ? "liabilities" : null,
+    capexStale ? "capital spending" : null,
+    grossPts[0] && grossProfit == null ? "gross profit" : null,
+  ].filter((item): item is string => item != null)
+  if (dropped.length) {
+    const line = dropped.length === 1 ? dropped[0] : `${dropped.slice(0, -1).join(", ")} and ${dropped[dropped.length - 1]}`
+    warnings.push(`The ${line} figure${dropped.length === 1 ? "" : "s"} in the filing feed ${dropped.length === 1 ? "is" : "are"} from a different statement than the latest results, so ${dropped.length === 1 ? "it was" : "they were"} left blank.`)
   }
-  if (dilutedIsNewer || (!sharePts.length && dilutedPts.length)) {
+  if (dilutedIsNewer) {
     warnings.push("Share count is the diluted average. The year-end outstanding count is missing or older.")
   }
 
