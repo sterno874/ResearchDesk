@@ -1,4 +1,4 @@
-import { money, plainPct } from "./format"
+import { money, plainPct, price } from "./format"
 import { companySic, loadAnnual, loadProxy } from "./filingdoc"
 import { readAnnual, type AnnualRead, type SegmentLine } from "./ixbrl"
 import { mergePeople, readFilingPeople, readPeople, type PeopleRead } from "./people"
@@ -228,7 +228,7 @@ function shapeLayer(report: Report, sicDescription: string | null): DiveLayer {
     blocks: [
       {
         type: "p",
-        text: `${metrics.name}${sicDescription ? ` files as ${sicDescription.toLowerCase()}` : ""}. Revenue across the years on the blotter read: ${revenue || "not in the annual facts"}. Free cash flow is ${money(metrics.fcf)}. The equity is worth ${money(metrics.marketCap)} at ${money(metrics.price)} a share.`,
+        text: `${metrics.name}${sicDescription ? ` files as ${sicDescription.toLowerCase()}` : ""}. Revenue across the years on the blotter read: ${revenue || "not in the annual facts"}. Free cash flow is ${money(metrics.fcf)}. The equity is worth ${money(metrics.marketCap)} at ${price(metrics.price)} a share.`,
       },
       lead
         ? { type: "p", text: `The broad report already has a costume on it: ${lead.title}. ${lead.looksLike}` }

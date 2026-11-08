@@ -339,9 +339,9 @@ export function buildTraps(input: {
       looksLike: "A fallen margin at a famous franchise, so the old earnings are treated as a discounted target.",
       actually: `Restoring this company's own older margin on today's revenue still prices the stock around ${price(base)} a share, which is under the market at ${price(metrics.price)}. The bull case is the one that also needs the old sales back. A chart of what the business used to earn is not a margin of safety. Each point of the story has to be priced on its own, and margin recovery on today's sales does not clear today's price.`,
       figures: [
-        { label: "Price", value: money(metrics.price) },
-        { label: "Base case", value: money(base) },
-        { label: "Bull case", value: money(memo.target.bull) },
+        { label: "Price", value: price(metrics.price) },
+        { label: "Base case", value: price(base) },
+        { label: "Bull case", value: price(memo.target.bull) },
         { label: "Latest margin", value: plainPct(metrics.currentOperatingMargin, 1) },
         { label: "Older margin", value: plainPct(metrics.normalOperatingMargin, 1) },
       ],
@@ -366,7 +366,7 @@ export function buildTraps(input: {
         { label: "Free-cash-flow yield", value: plainPct(metrics.fcfYield, 1) },
         { label: "Return on capital", value: plainPct(metrics.roic, 0) },
         { label: "Operating margin", value: plainPct(metrics.operatingMargin, 1) },
-        { label: "Fair, no growth", value: money(memo.target.fairNow) },
+        { label: "Fair, no growth", value: price(memo.target.fairNow) },
       ],
       memoLine: "The business is good. The price is the part that fails.",
     })
