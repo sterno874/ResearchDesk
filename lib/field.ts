@@ -168,7 +168,7 @@ async function inBatches<T, R>(items: T[], size: number, run: (item: T) => Promi
 
 async function peerSnaps(companies: Company[], fresh: boolean, sic: string): Promise<Snap[]> {
   if (!fresh) {
-    const cached = await readJson<Snap[]>(`field-snaps-v7-${sic}.json`, 12 * 60 * 60 * 1000)
+    const cached = await readJson<Snap[]>(`field-snaps-v8-${sic}.json`, 12 * 60 * 60 * 1000)
     const want = new Set(companies.map((company) => company.cik))
     const picked = cached?.filter((snap) => want.has(snap.cik)) ?? []
     if (want.size > 0 && picked.length === want.size) return picked
@@ -184,7 +184,7 @@ async function peerSnaps(companies: Company[], fresh: boolean, sic: string): Pro
       return null
     }
   })).filter((snap): snap is Snap => snap != null)
-  if (snaps.length) await writeEntry(`cache/field-snaps-v7-${sic}.json`, JSON.stringify(snaps)).catch(() => undefined)
+  if (snaps.length) await writeEntry(`cache/field-snaps-v8-${sic}.json`, JSON.stringify(snaps)).catch(() => undefined)
   return snaps
 }
 

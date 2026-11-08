@@ -134,9 +134,8 @@ function dated(facts: CompanyFacts, name: string, kind: "flow" | "instant"): Ann
 }
 
 function onAnchor(facts: CompanyFacts, name: string, kind: "flow" | "instant", anchor: string | null): number | null {
-  const point = dated(facts, name, kind)
-  if (!point || !onStatement(point.end, anchor)) return null
-  return point.val
+  // The newest point is often a later quarter. The statement being scored is the one nearest the year.
+  return valueOnStatement(annualSeries(facts, [name], kind), anchor)
 }
 
 function closeTo(a: number, b: number): boolean {
@@ -219,7 +218,8 @@ function readDebt(facts: CompanyFacts, anchor: string | null): { debt: number; s
   if (paperExtra > 0 && shortExtra > 0 && closeTo(paperExtra, shortExtra)) shortExtra = 0
   let extra = paperExtra + shortExtra
   const ceiling = combined ?? obligations ?? including
-  if (ceiling != null && extra > 0 && core + extra > ceiling * 1.02) extra = 0
+  // A ceiling that merely repeats the long-term line does not already contain the short-term borrowings.
+  if (ceiling != null && extra > 0 && ceiling > core * 1.02 && core + extra > ceiling * 1.02) extra = 0
   return { debt: core + extra, stale: false, filed: true }
 }
 
