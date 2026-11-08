@@ -412,8 +412,30 @@ export function buildMetrics(input: {
   const eps = valueOnStatement(epsPts, fiscalAnchor)
   const shareOnStatement = valueOnStatement(sharePts, fiscalAnchor)
   const dilutedOnStatement = valueOnStatement(dilutedPts, fiscalAnchor)
-  const dilutedIsNewer = shareOnStatement == null && dilutedOnStatement != null
-  const shares = shareOnStatement ?? dilutedOnStatement
+  // The cover states shares outstanding. A 10-K cover is often dated a few weeks after the year, still the same count.
+  const coverShares = (() => {
+    if (shareOnStatement != null || !fiscalAnchor) return null
+    const points = annualSeries(facts, ["EntityCommonStockSharesOutstanding"], "instant")
+    let best: AnnualPoint | null = null
+    let bestGap = Infinity
+    for (const point of points) {
+      const gap = Math.abs(Date.parse(point.end) - Date.parse(fiscalAnchor))
+      if (!Number.isFinite(gap) || gap > 80 * DAY_MS || !(point.val > 0)) continue
+      if (gap < bestGap) {
+        best = point
+        bestGap = gap
+      }
+    }
+    if (!best) return null
+    if (dilutedOnStatement != null) {
+      const scale = best.val / dilutedOnStatement
+      // A cover in a different unit, such as an ADS, is not this share count.
+      if (scale < 0.8 || scale > 1.5) return null
+    }
+    return best.val
+  })()
+  const dilutedIsNewer = shareOnStatement == null && coverShares == null && dilutedOnStatement != null
+  const shares = shareOnStatement ?? coverShares ?? dilutedOnStatement
   const dps = valueOnStatement(dpsPts, fiscalAnchor)
   const dividends = valueOnStatement(dividendPts, fiscalAnchor)
 
@@ -519,6 +541,9 @@ export function buildMetrics(input: {
   }
   if (dilutedIsNewer) {
     warnings.push("Share count is the diluted average. The year-end outstanding count is missing or older.")
+  }
+  if (coverShares != null) {
+    warnings.push("Share count is the outstanding count on the filing cover. The balance-sheet share tag was missing.")
   }
   if (grossRead.derived) {
     warnings.push("Gross profit was not tagged. It is revenue minus the cost line on the same statement.")
