@@ -299,6 +299,27 @@ function sameScale(point: AnnualPoint, chosen: Map<string, AnnualPoint>): boolea
   return ratio >= 0.5 && ratio <= 2
 }
 
+/** Revenue for the year. A contract-with-customer tag can be one line, while Revenues on the same statement is the total. */
+export function revenueSeries(facts: CompanyFacts, names: string[]): AnnualPoint[] {
+  const merged = annualSeries(facts, names, "flow")
+  const currency = reportingCurrency(facts, names)
+  if (!currency) return merged
+  const others = names.map((name) => {
+    const found = resolveTag(facts, name)
+    if (!found || found.unit !== currency) return []
+    return flowAnnual(found.points)
+  })
+  return merged.map((point) => {
+    let best = point
+    for (const series of others) {
+      const other = series.find((item) => item.end === point.end)
+      // Twenty percent is past sales tax. A larger total on the same date is the income-statement revenue.
+      if (other && other.val > best.val * 1.2) best = { ...point, val: other.val, fy: other.fy ?? point.fy }
+    }
+    return best
+  })
+}
+
 export function annualSeries(facts: CompanyFacts, names: string[], kind: "flow" | "instant"): AnnualPoint[] {
   const series = names.map((name) =>
     kind === "flow" ? flowAnnual(rawPoints(facts, name)) : instantAnnual(rawPoints(facts, name)),

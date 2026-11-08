@@ -1,4 +1,4 @@
-import { annualSeries, readFilings, reportingCurrency, type Company, type CompanyFacts, type Submissions } from "./sec"
+import { annualSeries, readFilings, reportingCurrency, revenueSeries, type Company, type CompanyFacts, type Submissions } from "./sec"
 import { cv, median } from "./stats"
 import type { Metrics, Quote, YearPoint } from "./types"
 import type { AnnualPoint } from "./sec"
@@ -255,7 +255,7 @@ export function buildMetrics(input: {
     "SalesRevenueGoodsNet",
     "RegulatedAndUnregulatedOperatingRevenue",
   ]
-  const revenuePts = annualSeries(facts, revenueTags, "flow")
+  const revenuePts = revenueSeries(facts, revenueTags)
   const statementCurrency = reportingCurrency(facts, revenueTags)
   const incomePts = annualSeries(facts, ["NetIncomeLoss"], "flow")
   const operatingPts = annualSeries(facts, ["OperatingIncomeLoss"], "flow")
