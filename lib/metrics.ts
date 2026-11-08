@@ -548,9 +548,7 @@ export function buildMetrics(input: {
     const line = dropped.length === 1 ? dropped[0] : `${dropped.slice(0, -1).join(", ")} and ${dropped[dropped.length - 1]}`
     warnings.push(`The ${line} figure${dropped.length === 1 ? "" : "s"} in the filing feed ${dropped.length === 1 ? "is" : "are"} from a different statement than the latest results, so ${dropped.length === 1 ? "it was" : "they were"} left blank.`)
   }
-  if (capexMissing && cfo != null) {
-    warnings.push("Capital spending is not in the filing feed, so free cash flow was left blank rather than treating the spending as zero.")
-  }
+  if (capexMissing && cfo != null) warnings.push(MISSING_CAPEX)
   if (dilutedIsNewer) {
     warnings.push("Share count is the diluted average. The year-end outstanding count is missing or older.")
   }
@@ -647,6 +645,44 @@ export function buildMetrics(input: {
     schedule13d: filingRead.schedule13d,
     insiderForms: filingRead.insiderForms,
     warnings,
+  }
+}
+
+const MISSING_CAPEX = "Capital spending is not in the filing feed, so free cash flow was left blank rather than treating the spending as zero."
+
+/** USD capital spending, when the annual report states the total and the filing feed does not tag it. */
+export function statedCapitalSpending(text: string): number | null {
+  const matches = [...text.matchAll(/our capital expenditures totaled\s+([^.]{0,320})\./gi)]
+  if (matches.length !== 1) return null
+  const match = matches[0]
+  const body = match[1] ?? ""
+  if (!/\brespectively\b/i.test(body)) return null
+  const before = text.slice(Math.max(0, (match.index ?? 0) - 90), match.index ?? 0)
+  const years = [...before.matchAll(/\b(20\d{2})\b/g)].map((item) => Number(item[1]))
+  if (years.length < 2 || years.some((year, index) => index > 0 && year <= years[index - 1])) return null
+  const usd = [...body.matchAll(/US\$\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.\d+)?)\s*million/gi)]
+  if (usd.length !== 1) return null
+  const spending = Number(usd[0][1].replace(/,/g, "")) * 1_000_000
+  return Number.isFinite(spending) && spending > 0 ? spending : null
+}
+
+/** Fill free cash flow from the stated total. A tagged spending line is left alone. */
+export function applyStatedCapex(metrics: Metrics, capex: number | null): Metrics {
+  if (capex == null || metrics.capex != null || metrics.cfo == null) return metrics
+  if (metrics.statementCurrency != null && metrics.statementCurrency !== "USD") return metrics
+  if (metrics.revenue == null || capex > metrics.revenue * 2) return metrics
+  const aligned = metrics.statementCurrency == null || metrics.statementCurrency === metrics.currency
+  const fcf = metrics.cfo - capex
+  return {
+    ...metrics,
+    capex,
+    fcf,
+    ownerEarnings: fcf,
+    fcfYield: aligned && metrics.marketCap ? fcf / metrics.marketCap : null,
+    warnings: [
+      ...metrics.warnings.filter((line) => line !== MISSING_CAPEX),
+      "Capital spending was not tagged. Free cash flow uses the capital-expenditure total stated in the annual report.",
+    ],
   }
 }
 

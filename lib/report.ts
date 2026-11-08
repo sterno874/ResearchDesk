@@ -7,7 +7,7 @@ import { mergePeople, readFilingPeople, readPeople } from "./people"
 import { scoreAll } from "./investors"
 import { getQuote } from "./market"
 import { loadPositioning } from "./positioning"
-import { buildMetrics, quoteOnDepositary } from "./metrics"
+import { applyStatedCapex, buildMetrics, quoteOnDepositary, statedCapitalSpending } from "./metrics"
 import { buildHeadline, buildMemo, buildPitch } from "./narrative"
 import { loadFacts, loadSubmissions, loadUniverse, normalizeTicker } from "./sec"
 import { describeSector, loadStudies, sectorId, takesDeposits } from "./sector"
@@ -73,14 +73,18 @@ export const getReport = cache(async (raw: string, fresh = false): Promise<Repor
     return { ok: false, ticker, message: "EDGAR didn't return the company facts. Try the report again in a moment." }
   }
   const annualHtml = annualResult.status === "fulfilled" && annualResult.value ? annualResult.value.html : ""
-  const metrics = quoteOnDepositary(
-    buildMetrics({
-      company,
-      facts: factsResult.value,
-      submissions: submissionsResult.status === "fulfilled" ? submissionsResult.value : null,
-      quote: quoteResult.status === "fulfilled" ? quoteResult.value : null,
-    }),
-    annualHtml ? depositaryRatio(htmlToText(annualHtml)) : null,
+  const annualText = annualHtml ? htmlToText(annualHtml) : ""
+  const metrics = applyStatedCapex(
+    quoteOnDepositary(
+      buildMetrics({
+        company,
+        facts: factsResult.value,
+        submissions: submissionsResult.status === "fulfilled" ? submissionsResult.value : null,
+        quote: quoteResult.status === "fulfilled" ? quoteResult.value : null,
+      }),
+      annualText ? depositaryRatio(annualText) : null,
+    ),
+    statedCapitalSpending(annualText),
   )
   if (metrics.revenue == null && metrics.netIncome == null && metrics.equity == null) {
     return {
@@ -119,7 +123,7 @@ export const getReport = cache(async (raw: string, fresh = false): Promise<Repor
     sicDescription: submissions?.sicDescription ?? null,
     submissions,
     history: quoteResult.status === "fulfilled" ? quoteResult.value.history : [],
-    annualText: annualHtml ? htmlToText(annualHtml) : "",
+    annualText,
   })
   const memo = attachWall(draft, traps)
   const overview = annualResult.status === "fulfilled" && annualResult.value
