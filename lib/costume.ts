@@ -89,6 +89,17 @@ function offeringPrice(text: string): number | null {
   return value >= 0.5 && value <= 500 ? value : null
 }
 
+/** Ordinary shares per ADS, when the annual report states a ratio of two or more. */
+export function depositaryRatio(text: string): number | null {
+  const match = text.match(
+    /each (?:ADS|American depositary share) represents ([a-z]+|\d+(?:\.\d+)?) (?:ordinary )?shares?|each representing ([a-z]+|\d+(?:\.\d+)?) ordinary shares?/i,
+  )
+  const raw = match?.[1] ?? match?.[2]
+  const ratio = raw ? parseRatio(raw) : null
+  if (ratio == null || !Number.isInteger(ratio) || ratio < 2 || ratio > 100) return null
+  return ratio
+}
+
 function shareRatio(text: string): number | null {
   const match = text.match(
     /each (?:ADS|American depositary share) represents ([a-z]+|\d+(?:\.\d+)?) ordinary shares?|each representing ([a-z]+|\d+(?:\.\d+)?) ordinary shares?/i,

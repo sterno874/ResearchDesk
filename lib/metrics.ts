@@ -649,3 +649,44 @@ export function buildMetrics(input: {
     warnings,
   }
 }
+
+/** The quote is one ADS. Earnings that tie to the ordinary count are restated per ADS. */
+export function quoteOnDepositary(metrics: Metrics, ratio: number | null): Metrics {
+  if (ratio == null || ratio < 2 || metrics.shares == null || metrics.shares <= 0 || metrics.eps == null || metrics.netIncome == null || metrics.netIncome === 0) {
+    return metrics
+  }
+  const ordinary = metrics.shares
+  const ads = ordinary / ratio
+  if (!(ads > 0)) return metrics
+  const gap = Math.abs(metrics.eps * ordinary - metrics.netIncome) / Math.abs(metrics.netIncome)
+  if (gap > 0.2) return metrics
+  const shares = ads
+  const eps = metrics.eps * ratio
+  const aligned = metrics.statementCurrency == null || metrics.statementCurrency === metrics.currency
+  const marketCap = metrics.price != null ? metrics.price * shares : null
+  const enterpriseValue = !aligned || marketCap == null || metrics.debt == null || metrics.cash == null
+    ? null
+    : marketCap + metrics.debt - metrics.cash
+  const bookPerShare = metrics.equity != null && metrics.equity > 0 ? metrics.equity / shares : null
+  return {
+    ...metrics,
+    shares,
+    eps,
+    marketCap,
+    enterpriseValue,
+    pe: aligned && metrics.price != null && eps > 0 ? metrics.price / eps : null,
+    pb: aligned && marketCap != null && metrics.equity != null && metrics.equity > 0 ? marketCap / metrics.equity : null,
+    fcfYield: aligned && metrics.fcf != null && marketCap ? metrics.fcf / marketCap : null,
+    earningsYield: aligned && metrics.operatingIncome != null && enterpriseValue != null && enterpriseValue > 0
+      ? metrics.operatingIncome / enterpriseValue
+      : null,
+    dividendYield: aligned && metrics.dividendYield != null ? metrics.dividendYield * ratio : null,
+    bookPerShare: aligned ? bookPerShare : null,
+    ncavPerShare: aligned && metrics.ncavPerShare != null ? metrics.ncavPerShare * ratio : null,
+    grahamNumber: aligned && metrics.grahamNumber != null ? metrics.grahamNumber * ratio : null,
+    warnings: [
+      ...metrics.warnings,
+      `Each ADS is ${ratio} ordinary shares. The quote is one ADS, so the share count and the per-share figures are in ADSs.`,
+    ],
+  }
+}

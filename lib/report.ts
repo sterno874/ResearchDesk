@@ -7,12 +7,13 @@ import { mergePeople, readFilingPeople, readPeople } from "./people"
 import { scoreAll } from "./investors"
 import { getQuote } from "./market"
 import { loadPositioning } from "./positioning"
-import { buildMetrics } from "./metrics"
+import { buildMetrics, quoteOnDepositary } from "./metrics"
 import { buildHeadline, buildMemo, buildPitch } from "./narrative"
 import { loadFacts, loadSubmissions, loadUniverse, normalizeTicker } from "./sec"
 import { describeSector, loadStudies, sectorId, takesDeposits } from "./sector"
 import { shorthand, statementGaps } from "./rank"
 import { saveRead } from "./reads"
+import { depositaryRatio } from "./costume"
 import { buildTraps } from "./traps"
 import type { Memo, ReportResult, Trap } from "./types"
 
@@ -71,12 +72,16 @@ export const getReport = cache(async (raw: string, fresh = false): Promise<Repor
   if (factsResult.status === "rejected") {
     return { ok: false, ticker, message: "EDGAR didn't return the company facts. Try the report again in a moment." }
   }
-  const metrics = buildMetrics({
-    company,
-    facts: factsResult.value,
-    submissions: submissionsResult.status === "fulfilled" ? submissionsResult.value : null,
-    quote: quoteResult.status === "fulfilled" ? quoteResult.value : null,
-  })
+  const annualHtml = annualResult.status === "fulfilled" && annualResult.value ? annualResult.value.html : ""
+  const metrics = quoteOnDepositary(
+    buildMetrics({
+      company,
+      facts: factsResult.value,
+      submissions: submissionsResult.status === "fulfilled" ? submissionsResult.value : null,
+      quote: quoteResult.status === "fulfilled" ? quoteResult.value : null,
+    }),
+    annualHtml ? depositaryRatio(htmlToText(annualHtml)) : null,
+  )
   if (metrics.revenue == null && metrics.netIncome == null && metrics.equity == null) {
     return {
       ok: false,
@@ -106,7 +111,6 @@ export const getReport = cache(async (raw: string, fresh = false): Promise<Repor
     positioning.shortPercent = positioning.shortInterest / metrics.shares
   }
   const draft = buildMemo(metrics, id)
-  const annualHtml = annualResult.status === "fulfilled" && annualResult.value ? annualResult.value.html : ""
   const traps = buildTraps({
     facts: factsResult.value,
     metrics,
