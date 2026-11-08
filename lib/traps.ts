@@ -337,7 +337,7 @@ export function buildTraps(input: {
       severity: "serious",
       title: "The old business is already in the price",
       looksLike: "A fallen margin at a famous franchise, so the old earnings are treated as a discounted target.",
-      actually: `Restoring this company's own older margin on today's revenue still prices the stock around ${money(base)} a share, which is under the market at ${money(metrics.price)}. The bull case is the one that also needs the old sales back. A chart of what the business used to earn is not a margin of safety. Each point of the story has to be priced on its own, and margin recovery on today's sales does not clear today's price.`,
+      actually: `Restoring this company's own older margin on today's revenue still prices the stock around ${price(base)} a share, which is under the market at ${price(metrics.price)}. The bull case is the one that also needs the old sales back. A chart of what the business used to earn is not a margin of safety. Each point of the story has to be priced on its own, and margin recovery on today's sales does not clear today's price.`,
       figures: [
         { label: "Price", value: money(metrics.price) },
         { label: "Base case", value: money(base) },

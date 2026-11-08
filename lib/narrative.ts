@@ -43,6 +43,14 @@ function lowerPositive(a: number | null, b: number | null): number | null {
   return Math.min(...values)
 }
 
+/** Book can pull a bear case down. It cannot become the bear by sitting above the recovery price. */
+function bearBelow(earnings: number | null, asset: number | null, base: number | null): number | null {
+  const picked = lowerPositive(earnings, asset)
+  if (picked != null && (base == null || picked <= base)) return picked
+  if (earnings != null && earnings > 0 && (base == null || earnings <= base)) return earnings
+  return null
+}
+
 function assumptions(specific: string[]): string[] {
   return [
     ...specific,
@@ -70,10 +78,10 @@ function turnaround(metrics: Metrics): Memo {
   const shares = metrics.shares
   const baseEarn = revenue != null && normal != null && normal > 0 ? earningsPower(revenue, normal) : null
   const base = perShare(baseEarn != null ? baseEarn * multiple : null, shares)
-  const bearEarn = revenue != null && current != null && current > 0 ? earningsPower(revenue, current) : 0
-  const bearFromEarnings = perShare(bearEarn * Math.max(6, multiple - 5), shares)
+  const bearEarn = revenue != null && current != null && current > 0 ? earningsPower(revenue, current) : null
+  const bearFromEarnings = bearEarn != null ? perShare(bearEarn * Math.max(6, multiple - 5), shares) : null
   const asset = metrics.bookPerShare != null && metrics.bookPerShare > 0 ? metrics.bookPerShare * 0.7 : null
-  const bear = lowerPositive(bearFromEarnings, asset)
+  const bear = bearBelow(bearFromEarnings, asset, base)
   const peak = metrics.peakRevenue != null && revenue != null ? Math.max(metrics.peakRevenue, revenue) : revenue
   const bullEarn = peak != null && normal != null && normal > 0 ? earningsPower(peak, normal) : null
   const bull = perShare(bullEarn != null ? bullEarn * (multiple + 3) : null, shares)
@@ -88,7 +96,7 @@ function turnaround(metrics: Metrics): Memo {
     method: "Base case restores the company's own older operating margin on today's revenue, then applies a conservative multiple. Revenue is not assumed to recover except in the bull case.",
     assumptions: assumptions([
       `Normal operating margin is the median of earlier years, ${plainPct(normal, 1)}. The latest year is ${plainPct(current, 1)}.`,
-      `The base multiple is ${multiple}× after-tax earnings power. The bear case keeps today's margin if it is positive, and also looks at 70% of book.`,
+      `The base multiple is ${multiple}× after-tax earnings power. The bear case keeps today's margin if it is positive, and uses 70% of book only when that figure is lower. A loss is not assigned the book value.`,
     ]),
   }
   const stages: Stage[] = [
@@ -112,7 +120,15 @@ function turnaround(metrics: Metrics): Memo {
     {
       when: addMonths(30),
       title: "What the price could be",
-      detail: `If the market then pays ${multiple}× that earning power, the base price is ${price(base, metrics.currency)}. The bear case, if the slump stays, is ${price(bear, metrics.currency)}. ${
+      detail: `If the market then pays ${multiple}× that earning power, the base price is ${price(base, metrics.currency)}. ${
+        bear != null
+          ? `The bear case, if the slump stays, is ${price(bear, metrics.currency)}.`
+          : current != null && current <= 0 && asset != null && base != null && asset > base
+            ? `The latest year lost money, so the slump has no earnings price. Seventy percent of book is ${price(asset, metrics.currency)}, and that sits above the recovery case, so it is not the bear.`
+            : current != null && current <= 0
+              ? "The latest year lost money, so the slump has no earnings price."
+              : "The bear case is not set."
+      } ${
         metrics.debtToEquity != null && metrics.debtToEquity > 1
           ? `Debt is ${metrics.debtToEquity.toFixed(1)}× equity, which can eat the wait.`
           : "The balance sheet is not the loudest risk. The risk is that the margin never comes back."
@@ -204,7 +220,7 @@ function unclear(metrics: Metrics): Memo {
   const fromCash = perShare(earning != null ? earning * multiple : null, metrics.shares)
   const book = metrics.bookPerShare != null && metrics.bookPerShare > 0 ? metrics.bookPerShare : null
   const base = fromCash ?? book
-  const bear = book != null ? book * 0.6 : fromCash != null ? fromCash * 0.6 : null
+  const bear = bearBelow(fromCash != null ? fromCash * 0.6 : null, book != null ? book * 0.6 : null, base)
   const bull = fromCash != null ? fromCash * 1.35 : book
   const method = fromCash != null
     ? "There is no clean turnaround and no high-return compounder in the filings. The base number is a cautious multiple on current free cash flow, not a forecast of a better business."
