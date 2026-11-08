@@ -176,7 +176,7 @@ function clipItem(rest: string): string {
 }
 
 function readItem(plain: string): string {
-  const pattern = /item\s+1\.?\s+business|item\s+4\.?\s+information on the company/gi
+  const pattern = /item\s+1\.?\s+business|item\s+4\.?\s+inform\s*ation on the company/gi
   let bestAt = -1
   let bestScore = 0
   for (const match of plain.matchAll(pattern)) {
@@ -186,6 +186,7 @@ function readItem(plain: string): string {
     if (/\b(see|refer|under|caption|discussion|described|included|pursuant)\b/i.test(before)) continue
     if (/^\s*[.·]\s*\d/.test(after)) continue
     if (/^\s*[–—\-]/.test(after)) continue
+    if (/^\s*,\s*[”"']/.test(after)) continue
     if (/^\s*["“”']?\s*above\b/i.test(after)) continue
     if (/^\s*[”"']/.test(after)) continue
     if (/^\s*of this report\b/i.test(after)) continue
@@ -338,8 +339,8 @@ export function readAnnual(html: string): AnnualRead {
 }
 
 function businessBody(item: string): string {
-  const at = item.search(/\bbusiness overview\b/i)
-  if (at >= 0 && item.length - at > 200) return item.slice(at)
+  const match = /\bbusiness overview\b(?!\s*[–—\-])/i.exec(item)
+  if (match && item.length - match.index > 200) return item.slice(match.index)
   return item
 }
 
@@ -357,6 +358,7 @@ function stripHeading(part: string): string {
   }
   return text
     .replace(/^(?:[A-Z]{2,}\s+)+(?=(?!Inc\b|Corp\b|Co\b|Ltd\b|LLC\b|Company\b|Group\b|Holdings\b|Limited\b|Corporation\b|Motors\b)[A-Z][a-z])/, "")
+    .replace(/^((?:\S+\s+){1,4})(\1)/i, "$2")
     .trim()
 }
 
@@ -391,6 +393,7 @@ function businessSentences(item: string, count: number): string {
       if (/founders' letter|not a conventional company/i.test(part)) return false
       if (/^(products|services|competition|item)\b/i.test(part)) return false
       if (/®/.test(part.slice(0, 90))) return false
+      if (/registered trademark|service mark|used herein with permission/i.test(part)) return false
       if (/fiscal year is the 52-/i.test(part)) return false
       const bare = unquoted(part)
       if (bare.length < 40) return false
