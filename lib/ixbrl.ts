@@ -72,7 +72,7 @@ function annualSpan(start: string, end: string): boolean {
 function kindOf(name: string): { kind: Kind; rank: number; ebitdaLabel: string | null } | null {
   const local = localName(name)
   if (local === "Revenues" || local === "RevenuesNetOfInterestExpense") return { kind: "revenue", rank: 3, ebitdaLabel: null }
-  if (local.startsWith("RevenueFromContractWithCustomer")) return { kind: "revenue", rank: 2, ebitdaLabel: null }
+  if (local === "Revenue" || local.startsWith("RevenueFromContractWithCustomer")) return { kind: "revenue", rank: 2, ebitdaLabel: null }
   if (/AdjustedEarningsBeforeInterestTaxesDepreciation/i.test(local)) {
     return { kind: "ebitda", rank: 3, ebitdaLabel: "Adjusted EBITDA" }
   }
@@ -100,6 +100,7 @@ function kindOf(name: string): { kind: Kind; rank: number; ebitdaLabel: string |
   if (local === "EarningsBeforeInterestAndTax" || local === "EarningsBeforeInterestAndTaxes") {
     return { kind: "ebitda", rank: 0, ebitdaLabel: "EBIT" }
   }
+  if (local === "AdjustedEarnings") return { kind: "ebitda", rank: 0, ebitdaLabel: "Adjusted earnings" }
   if (local === "Contribution") return { kind: "ebitda", rank: 0, ebitdaLabel: "Contribution" }
   if (local === "GrossProfit") return { kind: "ebitda", rank: -1, ebitdaLabel: "Gross profit" }
   if (
@@ -133,7 +134,7 @@ function isSegmentMember(member: Member): boolean {
   if (/ProductOrServiceAxis|StatementGeographicalAxis|ConsolidationItemsAxis/.test(dimension)) return false
   if (isSkipped(member)) return false
   if (/SegmentMember$/.test(name) && !/^(OperatingSegments|ReportableSegments|Segments)Member$/.test(name)) return true
-  return dimension === "StatementBusinessSegmentsAxis" && /Member$/.test(name)
+  return (dimension === "StatementBusinessSegmentsAxis" || dimension === "SegmentsAxis") && /Member$/.test(name)
 }
 
 /** A subsegment is the line. The parent brand on the same fact is the rollup. */
