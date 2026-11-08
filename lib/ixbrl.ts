@@ -337,21 +337,51 @@ export function readAnnual(html: string): AnnualRead {
   }
 }
 
-function businessSentences(item: string, count: number): string {
-  const parts = splitSentences(item)
-    .map((part) => part
-      .replace(/^(?:(?:item\s+1|business|company background|business overview|overview|our history and structure|about the company)\s+)+/i, "")
+function businessBody(item: string): string {
+  const at = item.search(/\bbusiness overview\b/i)
+  if (at >= 0 && item.length - at > 200) return item.slice(at)
+  return item
+}
+
+function stripHeading(part: string): string {
+  let text = part.replace(/\s+/g, " ").trim()
+  for (let i = 0; i < 5; i++) {
+    const next = text
+      .replace(/^(?:[A-D]\.\s+)?(?:history and development of the company|business overview|corporate information|corporate history|our mission and vision|our history and structure|company background|about the company|overview)\s+/i, "")
+      .replace(/^(?:(?:item\s+1|business)\s+)+/i, "")
       .replace(/^(?:GENERAL\s+)+/, "")
-      .replace(/^(?:[A-Z]{2,}\s+)+(?=(?!Inc\b|Corp\b|Co\b|Ltd\b|LLC\b|Company\b|Group\b|Holdings\b|Limited\b|Corporation\b|Motors\b)[A-Z][a-z])/, "")
       .replace(/^general\s+(?!motors\b)/i, "")
-      .replace(/\s+/g, " ")
-      .trim())
+      .trim()
+    if (next === text) break
+    text = next
+  }
+  return text
+    .replace(/^(?:[A-Z]{2,}\s+)+(?=(?!Inc\b|Corp\b|Co\b|Ltd\b|LLC\b|Company\b|Group\b|Holdings\b|Limited\b|Corporation\b|Motors\b)[A-Z][a-z])/, "")
+    .trim()
+}
+
+function isCharter(part: string): boolean {
+  if (/we acquired the business|had been incorporated|we were incorporated|registered office|principal executive offices|website address|incorporated by reference|inactive textual references|our telephone number|originally organized|was reorganized as|as used herein|unless designated or identified otherwise/i.test(part)) {
+    return true
+  }
+  if (!/was incorporated/i.test(part)) return false
+  return !/\b(designs|manufactures|operates|provides|sells|serves|develops|offers|leading|manufacturer|retailer)\b/i.test(part)
+}
+
+function isIndex(part: string): boolean {
+  return (part.match(/\b\d{1,3}\b/g)?.length ?? 0) >= 4
+}
+
+function businessSentences(item: string, count: number): string {
+  const parts = splitSentences(businessBody(item))
+    .map(stripHeading)
     .filter((part) => {
       if (part.length < 40 || part.length > 480) return false
+      if (isCharter(part) || isIndex(part)) return false
       if (/^(products|services|competition|item)\b/i.test(part)) return false
       if (/®/.test(part.slice(0, 90))) return false
       if (/fiscal year is the 52-/i.test(part)) return false
-      return /\b(is|are|was|were|designs|manufactures|operates|provides|sells|serves|seeks|develops|owns|has|have|makes|offers)\b/i.test(part)
+      return /\b(is|are|was|were|designs?|manufactures?|operates?|provides?|sells?|serves?|seeks?|develops?|owns?|has|have|makes?|offers?|builds?)\b/i.test(part)
     })
   return parts.slice(0, count).join(" ")
 }
