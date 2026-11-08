@@ -358,7 +358,6 @@ function unitLayer(report: Report, annual: AnnualRead | null, sic: string | null
   const bridge = describeBridge(rows)
   if (bridge) blocks.push({ type: "p", text: bridge.text }, { type: "figures", items: bridge.figures })
   else if (grewAcross(rows)) blocks.push({ type: "note", text: "Every reportable segment with two years of revenue grew. There is no shrinking book to offset against a growing one." })
-  else blocks.push({ type: "note", text: "Two years of segment profit were not both tagged, so the bridge from a shrinking line to a growing line cannot be finished from this annual report." })
   return { id: "unit", n: 3, title: "The unit, and what offsets what", blocks }
 }
 
