@@ -269,6 +269,10 @@ export function buildMetrics(input: {
   ], "instant")
   const assetPts = annualSeries(facts, ["Assets"], "instant")
   const liabilityPts = annualSeries(facts, ["Liabilities"], "instant")
+  const balancePts = annualSeries(facts, ["LiabilitiesAndStockholdersEquity"], "instant")
+  const totalEquityPts = annualSeries(facts, ["StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"], "instant")
+  const parentEquityPts = annualSeries(facts, ["StockholdersEquity", "StockholdersEquityAttributableToParent"], "instant")
+  const nciPts = annualSeries(facts, ["MinorityInterest", "NoncontrollingInterest", "EquityAttributableToNoncontrollingInterest"], "instant")
   const currentAssetPts = annualSeries(facts, ["AssetsCurrent"], "instant")
   const currentLiabilityPts = annualSeries(facts, ["LiabilitiesCurrent"], "instant")
   const cfoPts = annualSeries(facts, ["NetCashProvidedByUsedInOperatingActivities"], "flow")
@@ -335,9 +339,28 @@ export function buildMetrics(input: {
   const grossProfit = grossRead.value
   const equity = valueOnStatement(equityPts, fiscalAnchor)
   const equityStale = equity == null && Boolean(equityPts[0])
-  const liabilities = valueOnStatement(liabilityPts, fiscalAnchor)
-  const liabilitiesStale = liabilities == null && Boolean(liabilityPts[0])
+  let liabilities = valueOnStatement(liabilityPts, fiscalAnchor)
   const assets = valueOnStatement(assetPts, fiscalAnchor)
+  let liabilitiesDerived = false
+  if (liabilities == null && assets != null) {
+    const balance = valueOnStatement(balancePts, fiscalAnchor)
+    // The total line equals assets only when equity on that statement is the equity that balances it.
+    if (balance != null && closeTo(balance, assets)) {
+      const totalEquity = valueOnStatement(totalEquityPts, fiscalAnchor)
+      const parentEquity = valueOnStatement(parentEquityPts, fiscalAnchor)
+      const nci = valueOnStatement(nciPts, fiscalAnchor)
+      const equityForIdentity = totalEquity != null
+        ? totalEquity
+        : parentEquity != null
+          ? parentEquity + Math.max(nci ?? 0, 0)
+          : null
+      if (equityForIdentity != null && assets - equityForIdentity > 0) {
+        liabilities = assets - equityForIdentity
+        liabilitiesDerived = true
+      }
+    }
+  }
+  const liabilitiesStale = liabilities == null && Boolean(liabilityPts[0])
   const deposits = onAnchor(facts, "Deposits", "instant", fiscalAnchor)
     ?? onAnchor(facts, "DepositsInterestBearing", "instant", fiscalAnchor)
   if (!debtRead.filed && debt === 0) {
@@ -499,6 +522,9 @@ export function buildMetrics(input: {
   }
   if (grossRead.derived) {
     warnings.push("Gross profit was not tagged. It is revenue minus the cost line on the same statement.")
+  }
+  if (liabilitiesDerived) {
+    warnings.push("Total liabilities were not tagged. They are assets minus equity on the same statement.")
   }
   const sharesOverTime = shareChange(sharePts.length ? sharePts : dilutedPts)
   if (sharesOverTime.unread) warnings.push(sharesOverTime.unread)
