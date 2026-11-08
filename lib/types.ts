@@ -134,6 +134,9 @@ export type Target = {
   base: number | null
   bull: number | null
   fairNow: number | null
+  /** Price at which the quote would count as deep value. Separate from bear, base, and bull. */
+  deep: number | null
+  deepNote: string
   method: string
   assumptions: string[]
 }

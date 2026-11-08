@@ -737,6 +737,12 @@ details.full summary {
 
 .target.base { border-color: var(--green); background: var(--green-soft); }
 
+.target.deep {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+  border-color: var(--gold);
+}
+
 .target b {
   display: block;
   font-family: var(--font-mono), ui-monospace, monospace;

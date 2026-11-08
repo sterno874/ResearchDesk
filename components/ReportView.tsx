@@ -369,7 +369,17 @@ export function ReportView({ report }: { report: Report }) {
               <b>{price(memo.target.bull, metrics.currency)}</b>
               <span>{gap(memo.target.bull, metrics.price)} from here</span>
             </div>
+            <div className="target deep">
+            <span className="kicker">Deep value</span>
+            <b>{price(memo.target.deep, metrics.currency)}</b>
+            <span>
+              {memo.target.deep != null && metrics.price != null && metrics.price <= memo.target.deep
+                ? "Already under it"
+                : `${gap(memo.target.deep, metrics.price)} from here`}
+            </span>
           </div>
+          </div>
+          {memo.target.deepNote ? <p className="vintage">{memo.target.deepNote}</p> : null}
           {memo.target.fairNow != null && memo.kind === "compounder" ? (
             <p className="vintage">What the multiple would pay today, with no growth credit: {price(memo.target.fairNow, metrics.currency)}.</p>
           ) : null}

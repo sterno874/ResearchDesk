@@ -83,6 +83,8 @@ function turnaround(metrics: Metrics): Memo {
     base,
     bull,
     fairNow: base,
+    deep: null,
+    deepNote: "",
     method: "Base case restores the company's own older operating margin on today's revenue, then applies a conservative multiple. Revenue is not assumed to recover except in the bull case.",
     assumptions: assumptions([
       `Normal operating margin is the median of earlier years, ${plainPct(normal, 1)}. The latest year is ${plainPct(current, 1)}.`,
@@ -156,6 +158,8 @@ function compounder(metrics: Metrics): Memo {
     base,
     bull,
     fairNow,
+    deep: null,
+    deepNote: "",
     method: "Owner earnings are free cash flow. They are grown for three years at a capped rate, then valued on a multiple set by the quality of the business. Fair value today is that multiple with no growth credit.",
     assumptions: assumptions([
       `Growth is capped at ${plainPct(growth, 1)} a year, even if the company has grown faster. The cap is the discipline.`,
@@ -210,6 +214,8 @@ function unclear(metrics: Metrics): Memo {
     base,
     bull,
     fairNow: base,
+    deep: null,
+    deepNote: "",
     method,
     assumptions: assumptions([
       fromCash != null
@@ -258,6 +264,8 @@ function withheld(label: string, summary: string, detail: string, method?: strin
     base: null,
     bull: null,
     fairNow: null,
+    deep: null,
+    deepNote: "",
     method: method ?? "No free-cash-flow multiple is set. That multiple prices an operating company, and this filing is a different business.",
     assumptions: [
       "The bear, base, and bull prices are withheld on purpose.",
@@ -273,58 +281,94 @@ function withheld(label: string, summary: string, detail: string, method?: strin
   }
 }
 
+function deepValue(metrics: Metrics, sector: SectorId): { price: number | null; note: string } {
+  if (metrics.statementCurrency && metrics.statementCurrency !== metrics.currency) {
+    return {
+      price: null,
+      note: "No deep-value price. The statements and the quote are in different currencies.",
+    }
+  }
+  const book = metrics.bookPerShare != null && metrics.bookPerShare > 0 ? metrics.bookPerShare : null
+  const paidDown = metrics.netIncome != null && metrics.equity != null && metrics.equity > 0 && metrics.netIncome > metrics.equity
+  if (skipsMultiple(sector)) {
+    return book == null
+      ? { price: null, note: "Deep value for this statement is book value per share. Book was not available." }
+      : { price: book, note: "Deep value here is book value per share. An earnings multiple is not used on this statement." }
+  }
+  if (metrics.grahamNumber != null && metrics.grahamNumber > 0) {
+    return {
+      price: metrics.grahamNumber * (2 / 3),
+      note: "Deep value is two-thirds of the Graham number. That is a third under the price where earnings and book pass his 22.5 test. It is not the base-case multiple.",
+    }
+  }
+  if (book != null && !paidDown) {
+    return { price: book, note: "There is no Graham number. Deep value falls back to book value per share." }
+  }
+  return {
+    price: null,
+    note: paidDown
+      ? "Earnings are larger than the equity, so the book has been paid down. A deep-value price is not set from that book, and there is no Graham number."
+      : "A deep-value price needs positive earnings and positive book. This filing does not have both.",
+  }
+}
+
+function stamp(memo: Memo, metrics: Metrics, sector: SectorId): Memo {
+  const line = deepValue(metrics, sector)
+  return { ...memo, target: { ...memo.target, deep: line.price, deepNote: line.note } }
+}
+
 export function buildMemo(metrics: Metrics, sector: SectorId): Memo {
   if (metrics.statementCurrency && metrics.statementCurrency !== metrics.currency) {
-    return withheld(
+    return stamp(withheld(
       "Different currencies",
       `The annual figures are in ${metrics.statementCurrency}. The quote is in ${metrics.currency}. Revenue was ${money(metrics.revenue, metrics.statementCurrency)}.`,
       "A per-share price divides a statement total by the share count and sets it next to the quote. Those two numbers are not the same currency, and the filing feed did not give the exchange rate. The price is withheld.",
       "No per-share price is set. The statements and the quote are in different currencies.",
-    )
+    ), metrics, sector)
   }
   if (skipsMultiple(sector)) {
     if (sector === "bank") {
-      return withheld(
+      return stamp(withheld(
         "A bank, not a cash-flow multiple",
         `Return on equity is ${plainPct(metrics.roe, 0)} and the price is ${metrics.pb == null ? "unknown" : `${ratio(metrics.pb, 2)}×`} book. Cash from operations is the bank's own statement, not owner earnings.`,
         "The equity value of a bank is book and the return earned on it, through a credit cycle. A free-cash-flow yield here is the costume. Deposits and borrowings are the funding, and they are not a corporate bond stack sitting under an operating profit.",
-      )
+      ), metrics, sector)
     }
     if (sector === "insurer") {
-      return withheld(
+      return stamp(withheld(
         "An insurer, not a cash-flow multiple",
         `The price is ${metrics.pb == null ? "unknown" : `${ratio(metrics.pb, 2)}×`} book and the return on equity is ${plainPct(metrics.roe, 0)}. Underwriting and the investment book are in that return together.`,
         "An insurer is read against book. This feed does not split underwriting profit from investment income, and it does not turn the statement into free cash flow for a multiple.",
-      )
+      ), metrics, sector)
     }
-    return withheld(
+    return stamp(withheld(
       "A property trust, not a cash-flow multiple",
       `Revenue is ${money(metrics.revenue)} and the dividend yield is ${plainPct(metrics.dividendYield, 1)}. Free cash flow subtracts depreciation the buildings take on purpose.`,
       "A REIT is rent, debt, and the distribution. Funds from operations are not a tag this desk reads, so no bear, base, or bull price is set from free cash flow.",
-    )
+    ), metrics, sector)
   }
   if (developing(sector, metrics)) {
     const burn = metrics.fcf != null && metrics.fcf < 0 && metrics.cash != null && metrics.fcf !== 0
       ? ` Cash of ${money(metrics.cash)} against free cash flow of ${money(metrics.fcf)} is about ${(-metrics.cash / metrics.fcf).toFixed(1)} years of that burn.`
       : ""
-    return withheld(
+    return stamp(withheld(
       "Studies and cash, not a multiple",
       `Revenue is ${money(metrics.revenue)}. Profitable years on file: ${metrics.positiveEarningsYears} of ${metrics.earningsYears}.${burn}`,
       "The price of a development-stage drug company is the studies and the cash, then the shares that get issued to keep the studies going. An earnings multiple waits until a product has a sales record. The open studies, when the register has them, are in the sector section.",
-    )
+    ), metrics, sector)
   }
   if (spendingMissing(metrics)) {
-    return withheld(
+    return stamp(withheld(
       "Capital spending was not filed",
       `Cash from operations was ${money(metrics.cfo)}. The filing feed has no capital-spending line for that year, so free cash flow is left blank.`,
       "Free cash flow is cash from operations minus capital spending. A missing spending line is not a year with no spending. No bear, base, or bull price is set from that cash.",
       "No free-cash-flow price is set. Capital spending was not in the filing feed.",
-    )
+    ), metrics, sector)
   }
   const kind = pathKind(metrics)
-  if (kind === "turnaround") return turnaround(metrics)
-  if (kind === "compounder") return compounder(metrics)
-  return unclear(metrics)
+  if (kind === "turnaround") return stamp(turnaround(metrics), metrics, sector)
+  if (kind === "compounder") return stamp(compounder(metrics), metrics, sector)
+  return stamp(unclear(metrics), metrics, sector)
 }
 
 export function buildPitch(metrics: Metrics, memo: Memo, traps: Trap[], sector: SectorId): string {
