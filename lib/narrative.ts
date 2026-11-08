@@ -248,6 +248,10 @@ function unclear(metrics: Metrics): Memo {
   }
 }
 
+function spendingMissing(metrics: Metrics): boolean {
+  return metrics.warnings.some((line) => /capital spending is not in the filing feed/i.test(line))
+}
+
 function withheld(label: string, summary: string, detail: string, method?: string): Memo {
   const target: Target = {
     bear: null,
@@ -309,6 +313,14 @@ export function buildMemo(metrics: Metrics, sector: SectorId): Memo {
       "The price of a development-stage drug company is the studies and the cash, then the shares that get issued to keep the studies going. An earnings multiple waits until a product has a sales record. The open studies, when the register has them, are in the sector section.",
     )
   }
+  if (spendingMissing(metrics)) {
+    return withheld(
+      "Capital spending was not filed",
+      `Cash from operations was ${money(metrics.cfo)}. The filing feed has no capital-spending line for that year, so free cash flow is left blank.`,
+      "Free cash flow is cash from operations minus capital spending. A missing spending line is not a year with no spending. No bear, base, or bull price is set from that cash.",
+      "No free-cash-flow price is set. Capital spending was not in the filing feed.",
+    )
+  }
   const kind = pathKind(metrics)
   if (kind === "turnaround") return turnaround(metrics)
   if (kind === "compounder") return compounder(metrics)
@@ -352,6 +364,7 @@ export function buildPitch(metrics: Metrics, memo: Memo, traps: Trap[], sector: 
     (metrics.statementCurrency != null && metrics.statementCurrency !== metrics.currency)
     || skipsMultiple(sector)
     || developing(sector, metrics)
+    || spendingMissing(metrics)
   ) {
     play = memo.summary
   } else {

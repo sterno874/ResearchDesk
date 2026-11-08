@@ -35,8 +35,10 @@ export function sectorId(sic: string | null, description: string | null): Sector
 /** A drug developer that does not yet have a multi-year profit record. The cash-flow multiple is the wrong price. */
 export function developing(id: SectorId, metrics: Metrics): boolean {
   if (id !== "biotech" && id !== "pharma") return false
-  if ((metrics.revenue ?? 0) >= 500_000_000 && metrics.positiveEarningsYears >= 3 && (metrics.fcf ?? 0) > 0) return false
-  return metrics.positiveEarningsYears < 3 || (metrics.fcf ?? 0) <= 0
+  const established = (metrics.revenue ?? 0) >= 500_000_000 && metrics.positiveEarningsYears >= 3
+  // A missing free-cash-flow figure is not evidence that a large, profitable filer is still in development.
+  if (established && (metrics.fcf == null || metrics.fcf > 0)) return false
+  return metrics.positiveEarningsYears < 3 || metrics.fcf == null || metrics.fcf <= 0
 }
 
 export function skipsMultiple(id: SectorId): boolean {

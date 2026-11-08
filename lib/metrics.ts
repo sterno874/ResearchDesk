@@ -244,7 +244,9 @@ export function buildMetrics(input: {
   const currentLiabilities = currentLiabilityPts[0] && onStatement(currentLiabilityPts[0].end, fiscalAnchor) ? currentLiabilityPts[0].val : null
   const cfo = cfoPts[0] && onStatement(cfoPts[0].end, fiscalAnchor) ? cfoPts[0].val : null
   const capexStale = Boolean(capexPts[0] && !onStatement(capexPts[0].end, fiscalAnchor))
-  const capex = capexPts[0] && onStatement(capexPts[0].end, fiscalAnchor) ? Math.abs(capexPts[0].val) : capexPts.length ? null : 0
+  // No capital-spending tag is an unknown, not a year in which the company spent nothing.
+  const capexMissing = capexPts.length === 0
+  const capex = capexPts[0] && onStatement(capexPts[0].end, fiscalAnchor) ? Math.abs(capexPts[0].val) : null
   const eps = epsPts[0] && onStatement(epsPts[0].end, fiscalAnchor) ? epsPts[0].val : null
   const shareOnStatement = sharePts[0] && onStatement(sharePts[0].end, fiscalAnchor) ? sharePts[0].val : null
   const dilutedOnStatement = dilutedPts[0] && onStatement(dilutedPts[0].end, fiscalAnchor) ? dilutedPts[0].val : null
@@ -258,7 +260,8 @@ export function buildMetrics(input: {
   const aligned = statementCurrency == null || statementCurrency === currency
   const marketCap = price != null && shares ? price * shares : null
   const fcf = cfo == null || capex == null ? null : cfo - capex
-  const ownerEarnings = fcf ?? (capexStale ? null : netIncome)
+  // Cash from operations with the spending left off is not owner earnings, and neither is relabeling the profit.
+  const ownerEarnings = fcf ?? (capexStale || (capexMissing && cfo != null) ? null : netIncome)
   const enterpriseValue =
     marketCap == null ? null : marketCap + (debt ?? 0) - (liquid ?? 0)
   const pe = price != null && eps != null && eps > 0 ? price / eps : null
@@ -348,6 +351,9 @@ export function buildMetrics(input: {
   if (dropped.length) {
     const line = dropped.length === 1 ? dropped[0] : `${dropped.slice(0, -1).join(", ")} and ${dropped[dropped.length - 1]}`
     warnings.push(`The ${line} figure${dropped.length === 1 ? "" : "s"} in the filing feed ${dropped.length === 1 ? "is" : "are"} from a different statement than the latest results, so ${dropped.length === 1 ? "it was" : "they were"} left blank.`)
+  }
+  if (capexMissing && cfo != null) {
+    warnings.push("Capital spending is not in the filing feed, so free cash flow was left blank rather than treating the spending as zero.")
   }
   if (dilutedIsNewer) {
     warnings.push("Share count is the diluted average. The year-end outstanding count is missing or older.")

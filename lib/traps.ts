@@ -171,7 +171,6 @@ export function buildTraps(input: {
   const proxy = metrics.operatingIncome != null && depreciation != null
     ? metrics.operatingIncome + depreciation + addBacks
     : null
-  const capex = metrics.capex ?? 0
   const marketCap = metrics.marketCap
   const debt = metrics.debt
   const fcf = metrics.fcf

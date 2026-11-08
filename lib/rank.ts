@@ -132,6 +132,9 @@ export function shorthand(report: Report, now = new Date()): Omit<BlotterRead, "
     clock = skipsMultiple(report.sector.id)
       ? "Book and the return on it are the read. A one- or two-year close of a free-cash-flow gap is the wrong clock for this sector."
       : "The clock is the studies and the cash. A multiple catching up to earnings that are not in the statements yet is a guess."
+  } else if (report.metrics.warnings.some((line) => /capital spending is not in the filing feed/i.test(line))) {
+    horizon = "none"
+    clock = "Capital spending is missing from the filing feed, so free cash flow was left blank. A clock on a cash-flow gap is not set from a spending figure the filing did not give."
   }
 
   const reader = closest && mid != null
