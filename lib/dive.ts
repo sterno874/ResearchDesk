@@ -253,18 +253,23 @@ function businessLayer(report: Report, annual: AnnualRead | null, warnings: stri
   }
   if (segments.length) {
     const ebitda = segments.find((row) => row.ebitdaLabel)?.ebitdaLabel ?? "Segment profit"
+    const currency = books(segments[0]?.currency)
+    const segmentTotal = segments.reduce((sum, line) => books(line.currency) === currency ? sum + (line.revenue ?? 0) : sum, 0)
+    const consolidated = sameMoney(segments[0]?.currency, report) ? report.metrics.revenue : null
+    const between = consolidated != null && consolidated > 0 && segmentTotal > consolidated * 1.05
     blocks.push({
       type: "table",
-      caption: sameMoney(segments[0]?.currency, report) ? `${latest}, from the segment footnote` : `${latest}, from the segment footnote, in ${books(segments[0]?.currency)}`,
+      caption: consolidated != null ? `${latest}, from the segment footnote` : `${latest}, from the segment footnote, in ${currency}`,
       columns: ["Segment", "Revenue", "Share", ebitda, "Margin"],
       rows: segments.map((row) => {
-        const pool = sameMoney(row.currency, report)
-          ? report.metrics.revenue
-          : segments.reduce((sum, line) => books(line.currency) === books(row.currency) ? sum + (line.revenue ?? 0) : sum, 0)
-        const share = pool ? (row.revenue ?? 0) / pool : null
+        const pool = consolidated != null && !between ? consolidated : segmentTotal
+        const share = pool && books(row.currency) === currency ? (row.revenue ?? 0) / pool : null
         return [row.segment, cash(row.revenue, row.currency), plainPct(share, 0), cash(row.ebitda, row.currency), plainPct(row.margin, 0)]
       }),
     })
+    if (between) {
+      blocks.push({ type: "note", text: "These revenues include sales between segments. The shares are of that total, not of consolidated revenue." })
+    }
   }
   const categories = products.filter((line) => line.segment === "Category")
   const rollup = products.filter((line) => line.segment === "Rollup")
