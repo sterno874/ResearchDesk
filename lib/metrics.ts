@@ -412,9 +412,8 @@ export function buildMetrics(input: {
   const eps = valueOnStatement(epsPts, fiscalAnchor)
   const shareOnStatement = valueOnStatement(sharePts, fiscalAnchor)
   const dilutedOnStatement = valueOnStatement(dilutedPts, fiscalAnchor)
-  // The cover states shares outstanding. A 10-K cover is often dated a few weeks after the year, still the same count.
-  const coverShares = (() => {
-    if (shareOnStatement != null || !fiscalAnchor) return null
+  const coverCount = (() => {
+    if (!fiscalAnchor) return null
     const points = annualSeries(facts, ["EntityCommonStockSharesOutstanding"], "instant")
     let best: AnnualPoint | null = null
     let bestGap = Infinity
@@ -426,16 +425,29 @@ export function buildMetrics(input: {
         bestGap = gap
       }
     }
-    if (!best) return null
+    return best?.val ?? null
+  })()
+  // The cover states shares outstanding. A 10-K cover is often dated a few weeks after the year, still the same count.
+  const coverShares = (() => {
+    if (shareOnStatement != null || coverCount == null) return null
     if (dilutedOnStatement != null) {
-      const scale = best.val / dilutedOnStatement
+      const scale = coverCount / dilutedOnStatement
       // A cover in a different unit, such as an ADS, is not this share count.
       if (scale < 0.8 || scale > 1.5) return null
     }
-    return best.val
+    return coverCount
   })()
-  const dilutedIsNewer = shareOnStatement == null && coverShares == null && dilutedOnStatement != null
-  const shares = shareOnStatement ?? coverShares ?? dilutedOnStatement
+  const treasuryShares = onAnchor(facts, "TreasuryStockCommonShares", "instant", fiscalAnchor)
+  // Some filers tag shares issued as outstanding. Issued minus treasury then matches the cover.
+  const treasuryInOutstanding = shareOnStatement != null
+    && treasuryShares != null
+    && coverCount != null
+    && treasuryShares > shareOnStatement * 0.05
+    && shareOnStatement - treasuryShares > 0
+    && closeTo(shareOnStatement - treasuryShares, coverCount)
+    && !closeTo(shareOnStatement, coverCount)
+  const dilutedIsNewer = shareOnStatement == null && coverShares == null && !treasuryInOutstanding && dilutedOnStatement != null
+  const shares = treasuryInOutstanding ? coverCount : shareOnStatement ?? coverShares ?? dilutedOnStatement
   const dps = valueOnStatement(dpsPts, fiscalAnchor)
   const dividends = valueOnStatement(dividendPts, fiscalAnchor)
 
@@ -544,6 +556,9 @@ export function buildMetrics(input: {
   }
   if (coverShares != null) {
     warnings.push("Share count is the outstanding count on the filing cover. The balance-sheet share tag was missing.")
+  }
+  if (treasuryInOutstanding) {
+    warnings.push("The outstanding share tag matches shares issued and still includes treasury stock. The count is the filing cover, which matches issued minus treasury.")
   }
   if (grossRead.derived) {
     warnings.push("Gross profit was not tagged. It is revenue minus the cost line on the same statement.")
