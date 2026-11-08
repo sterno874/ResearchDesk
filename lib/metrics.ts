@@ -350,6 +350,20 @@ export function buildMetrics(input: {
       warnings.push("Borrowings were not in the filing feed, and liabilities are most of the assets, so debt was left blank rather than treated as zero.")
     }
   }
+  if (debt === 0) {
+    const leaseTotal = onAnchor(facts, "OperatingLeaseLiability", "instant", fiscalAnchor)
+    const leaseCurrent = onAnchor(facts, "OperatingLeaseLiabilityCurrent", "instant", fiscalAnchor)
+    const leaseLong = onAnchor(facts, "OperatingLeaseLiabilityNoncurrent", "instant", fiscalAnchor)
+    const lease = leaseTotal != null && leaseTotal > 0
+      ? leaseTotal
+      : (leaseCurrent ?? 0) + (leaseLong ?? 0) > 0
+        ? (leaseCurrent ?? 0) + (leaseLong ?? 0)
+        : null
+    if (lease != null) {
+      debt = lease
+      warnings.push("Borrowings were not drawn. Debt is the operating lease liability on the balance sheet.")
+    }
+  }
   const currentAssets = valueOnStatement(currentAssetPts, fiscalAnchor)
   const currentLiabilities = valueOnStatement(currentLiabilityPts, fiscalAnchor)
   const cfo = valueOnStatement(cfoPts, fiscalAnchor)
