@@ -300,12 +300,22 @@ function readItem(plain: string): string {
   return ""
 }
 
+function sectionAt(text: string, pattern: RegExp): number {
+  for (const match of text.matchAll(pattern)) {
+    const at = match.index ?? 0
+    const after = text.slice(at, at + 180)
+    if (/\btable of contents\b/i.test(after) || looksLikeContents(after)) continue
+    return at
+  }
+  return -1
+}
+
 function rivalsIn(competition: string): string[] {
   const found = new Set<string>()
   const pattern = /\b([A-Z][A-Za-z&.'’-]+(?:\s+[A-Z][A-Za-z&.'’-]+){0,3})\s+(Inc\.|Corp\.|Corporation|LLC|Ltd\.|Co\.)/g
   for (const match of competition.matchAll(pattern)) {
-    const name = `${match[1]} ${match[2]}`.replace(/\s+/g, " ")
-    if (/^(The|Our|Item|Part|United|Federal|Commission|Company|Securities)\b/.test(name)) continue
+    const name = `${match[1]} ${match[2]}`.replace(/\s+/g, " ").replace(/^(?:Table of )?Contents\s+/i, "")
+    if (/^(The|Our|Item|Part|United|Federal|Commission|Company|Securities|Contents|Table|See)\b/.test(name)) continue
     found.add(name)
     if (found.size >= 8) break
   }
@@ -423,7 +433,7 @@ export function readAnnual(html: string): AnnualRead {
 
   const plain = htmlToText(html)
   const item = readItem(plain)
-  const competitionAt = item.search(/\bCompetition\b/)
+  const competitionAt = sectionAt(item, /\bCompetition\b/g)
   const competition = competitionAt >= 0 ? sentences(item.slice(competitionAt, competitionAt + 1800), 5) : ""
   const factorsAt = item.search(/principal competitive factors/i)
   const competitiveFactors = factorsAt >= 0 ? sentences(item.slice(Math.max(0, factorsAt - 20), factorsAt + 500), 2) : ""
