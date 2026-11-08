@@ -313,9 +313,9 @@ async function readCached(cik: string): Promise<SectorStudy[] | null> {
 }
 
 /** Open studies this company leads, from the public trial register. Empty when the sector is not drugs. */
-export async function loadStudies(id: SectorId, company: string, cik: string): Promise<{ studies: SectorStudy[]; note: string | null }> {
+export async function loadStudies(id: SectorId, company: string, cik: string, fresh = false): Promise<{ studies: SectorStudy[]; note: string | null }> {
   if (id !== "biotech" && id !== "pharma") return { studies: [], note: null }
-  const cached = await readCached(cik)
+  const cached = fresh ? null : await readCached(cik)
   if (cached) {
     return {
       studies: cached,

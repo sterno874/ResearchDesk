@@ -1,7 +1,7 @@
 import { Pips } from "@/components/Pips"
 import { gap, money, plainPct, price, ratio, when } from "@/lib/format"
 import { shorthand } from "@/lib/rank"
-import type { InvestorScore, Metrics, Part, Report, SectorBrief, Trap } from "@/lib/types"
+import type { FieldBrief, InvestorScore, Metrics, Part, Report, SectorBrief, Trap } from "@/lib/types"
 
 function tone(score: number | null): "helps" | "hurts" | "mixed" {
   if (score == null) return "mixed"
@@ -131,6 +131,42 @@ function SectorSection({ sector }: { sector: SectorBrief }) {
     </section>
   )
 }
+function FieldSection({ field }: { field: FieldBrief }) {
+  return (
+    <section className="section">
+      <div className="section-head">
+        <h2>The field</h2>
+        <span className="eyebrow">{field.label}</span>
+      </div>
+      {field.rows.length ? (
+        <div className="dive-table-wrap">
+          <table className="years">
+            <thead>
+              <tr>
+                <th>Metric</th>
+                <th>This company</th>
+                <th>Field median</th>
+                <th>Versus the field</th>
+              </tr>
+            </thead>
+            <tbody>
+              {field.rows.map((row) => (
+                <tr key={row.label}>
+                  <td>{row.label}</td>
+                  <td>{row.company}</td>
+                  <td>{row.median}</td>
+                  <td>{row.sits}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      <p className="vintage">{field.note}</p>
+    </section>
+  )
+}
+
 function metric(label: string, value: string) {
   return (
     <div className="metric" key={label}>
@@ -193,8 +229,10 @@ export function ReportView({ report }: { report: Report }) {
       <SectorSection sector={report.sector} />
       <p className="deeper">
         <a className="btn" href={`/dive/${metrics.ticker}`}>Kick off a deep dive</a>
-        <span>The report is the wide cut. The dive reads the annual report, then the proxy, one level at a time.</span>
+        <a className="btn ghost" href={`/report/${metrics.ticker}?fresh=1`}>Refresh the filings</a>
+        <span>The report is the wide cut. The dive reads the annual report, then the proxy, one level at a time. Refresh pulls the company facts, the annual report, and the proxy again.</span>
       </p>
+      {report.pulledFresh ? <p className="vintage">The saved filing was set aside. Company facts, the annual report, and the proxy were pulled again for this pass.</p> : null}
       {metrics.warnings.length ? (
         <ul className="warnings">
           {metrics.warnings.map((warning) => <li key={warning}>{warning}</li>)}
@@ -225,6 +263,8 @@ export function ReportView({ report }: { report: Report }) {
               : "Return on capital is after-tax operating income over equity plus debt minus cash. Free cash flow is cash from operations minus capital spending. Book is accounting equity, not a liquidation value."}
         </p>
       </section>
+
+      <FieldSection field={report.field} />
 
       <section className="section">
         <div className="section-head">

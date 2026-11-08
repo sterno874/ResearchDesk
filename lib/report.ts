@@ -1,4 +1,5 @@
 import { cache } from "react"
+import { loadField } from "./field"
 import { loadAnnual, loadProxy } from "./filingdoc"
 import { htmlToText } from "./plain"
 import { readAnnual, readOverview } from "./ixbrl"
@@ -43,7 +44,7 @@ function attachWall(memo: Memo, traps: Trap[]): Memo {
   }
 }
 
-export const getReport = cache(async (raw: string): Promise<ReportResult> => {
+export const getReport = cache(async (raw: string, fresh = false): Promise<ReportResult> => {
   const ticker = normalizeTicker(raw)
   if (!/^[A-Z0-9-]{1,8}$/.test(ticker)) {
     return { ok: false, ticker: raw.toUpperCase(), message: "Use a ticker like AAPL or BRK-B." }
@@ -59,11 +60,11 @@ export const getReport = cache(async (raw: string): Promise<ReportResult> => {
   }
 
   const [factsResult, submissionsResult, quoteResult, annualResult, proxyResult] = await Promise.allSettled([
-    loadFacts(company.cik),
+    loadFacts(company.cik, fresh),
     loadSubmissions(company.cik),
     getQuote(company.ticker),
-    loadAnnual(company.cik),
-    loadProxy(company.cik),
+    loadAnnual(company.cik, fresh),
+    loadProxy(company.cik, fresh),
   ])
   if (factsResult.status === "rejected") {
     return { ok: false, ticker, message: "EDGAR didn't return the company facts. Try the report again in a moment." }
@@ -85,7 +86,18 @@ export const getReport = cache(async (raw: string): Promise<ReportResult> => {
   const filedAs = sectorId(submissions?.sic ?? null, submissions?.sicDescription ?? null)
   const id = filedAs === "operating" && takesDeposits(factsResult.value) ? "bank" : filedAs
   const investors = scoreAll(metrics, id).sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
-  const trials = await loadStudies(id, company.name, company.cik)
+  const [trials, field] = await Promise.all([
+    loadStudies(id, company.name, company.cik, fresh),
+    loadField({
+      company,
+      metrics,
+      sector: id,
+      sic: submissions?.sic ?? null,
+      sicDescription: submissions?.sicDescription ?? null,
+      universe,
+      fresh,
+    }),
+  ])
   const sector = describeSector(id, metrics, trials.studies, trials.note)
   const draft = buildMemo(metrics, id)
   const annualHtml = annualResult.status === "fulfilled" && annualResult.value ? annualResult.value.html : ""
@@ -131,6 +143,8 @@ export const getReport = cache(async (raw: string): Promise<ReportResult> => {
     traps,
     gaps,
     sector,
+    field,
+    pulledFresh: fresh,
   }
   await saveRead({ ...shorthand(report), readAt: new Date().toISOString() }).catch(() => undefined)
   return {

@@ -11,12 +11,20 @@ export async function generateMetadata({ params }: { params: Promise<{ ticker: s
   return { title: `${ticker.toUpperCase()} · Research Desk` }
 }
 
-export default async function ReportPage({ params }: { params: Promise<{ ticker: string }> }) {
+export default async function ReportPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ ticker: string }>
+  searchParams: Promise<{ fresh?: string }>
+}) {
   const { ticker } = await params
+  const { fresh } = await searchParams
+  const pullAgain = fresh === "1"
   const remote = researchApi()
   const result: ReportResult = remote
-    ? await fetch(`${remote}/api/report/${encodeURIComponent(ticker)}`, { cache: "no-store" }).then((response) => response.json())
-    : await getReport(ticker)
+    ? await fetch(`${remote}/api/report/${encodeURIComponent(ticker)}${pullAgain ? "?fresh=1" : ""}`, { cache: "no-store" }).then((response) => response.json())
+    : await getReport(ticker, pullAgain)
   if (!result.ok) {
     return (
       <main className="panel">

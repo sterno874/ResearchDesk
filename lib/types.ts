@@ -215,6 +215,23 @@ export type SectorBrief = {
   studiesNote: string | null
 }
 
+export type FieldRow = {
+  label: string
+  company: string
+  median: string
+  /** Above, Below, In line, or a blank when the field is too thin to say. */
+  sits: string
+}
+
+/** This company against the largest other filers in its SIC code. Not an input to the stars. */
+export type FieldBrief = {
+  sic: string | null
+  label: string
+  peers: { ticker: string; name: string }[]
+  rows: FieldRow[]
+  note: string
+}
+
 export type Report = {
   metrics: Metrics
   investors: InvestorScore[]
@@ -229,6 +246,9 @@ export type Report = {
   /** Pieces of the profile the filings did not fill. They cap the stars. */
   gaps: string[]
   sector: SectorBrief
+  field: FieldBrief
+  /** True when this pass ignored the saved facts, annual report, and proxy. */
+  pulledFresh: boolean
 }
 
 export type ReportResult =

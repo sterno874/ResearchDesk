@@ -116,10 +116,12 @@ export async function loadUniverse(): Promise<Universe> {
   return universe
 }
 
-export async function loadFacts(cik: string): Promise<CompanyFacts> {
+export async function loadFacts(cik: string, fresh = false): Promise<CompanyFacts> {
   const safe = padCik(cik)
-  const cached = await readFresh<CompanyFacts>(`facts-${safe}.json`, 12 * 60 * 60 * 1000)
-  if (cached) return cached
+  if (!fresh) {
+    const cached = await readFresh<CompanyFacts>(`facts-${safe}.json`, 12 * 60 * 60 * 1000)
+    if (cached) return cached
+  }
   const facts = await getJson<CompanyFacts>(
     `https://data.sec.gov/api/xbrl/companyfacts/CIK${safe}.json`,
     SEC_HEADERS,

@@ -29,11 +29,17 @@ function findForm(submissions: Submissions, forms: string[]): { form: string; ac
   return null
 }
 
-async function readHtml(cik: string, doc: { form: string; accession: string; file: string; filed: string }): Promise<FiledDoc> {
+async function readHtml(
+  cik: string,
+  doc: { form: string; accession: string; file: string; filed: string },
+  fresh: boolean,
+): Promise<FiledDoc> {
   const key = `cache/html-${doc.accession}.html`
   const url = documentUrl(cik, doc.accession, doc.file)
-  const cached = await readEntry(key)
-  if (cached) return { form: doc.form, filed: doc.filed, url, html: cached.text }
+  if (!fresh) {
+    const cached = await readEntry(key)
+    if (cached) return { form: doc.form, filed: doc.filed, url, html: cached.text }
+  }
   const response = await fetch(url, {
     headers: { ...SEC_HEADERS, Accept: "text/html,*/*" },
     signal: AbortSignal.timeout(90000),
@@ -44,18 +50,18 @@ async function readHtml(cik: string, doc: { form: string; accession: string; fil
   return { form: doc.form, filed: doc.filed, url, html }
 }
 
-export async function loadAnnual(cik: string): Promise<FiledDoc | null> {
+export async function loadAnnual(cik: string, fresh = false): Promise<FiledDoc | null> {
   const submissions = await loadSubmissions(cik)
   const doc = findForm(submissions, ["10-K", "20-F", "40-F"])
   if (!doc) return null
-  return readHtml(cik, doc)
+  return readHtml(cik, doc, fresh)
 }
 
-export async function loadProxy(cik: string): Promise<FiledDoc | null> {
+export async function loadProxy(cik: string, fresh = false): Promise<FiledDoc | null> {
   const submissions = await loadSubmissions(cik)
   const doc = findForm(submissions, ["DEF 14A"])
   if (!doc) return null
-  return readHtml(cik, doc)
+  return readHtml(cik, doc, fresh)
 }
 
 export async function companySic(cik: string): Promise<{ sic: string | null; sicDescription: string | null }> {
