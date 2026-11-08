@@ -223,6 +223,21 @@ export type FieldRow = {
   sits: string
 }
 
+/** Short interest and the option chain. Not an input to the stars. */
+export type Positioning = {
+  shortInterest: number | null
+  shortPrior: number | null
+  /** Change versus the prior settlement, as a fraction. */
+  shortChange: number | null
+  daysToCover: number | null
+  /** Short interest divided by the share count already on the report. */
+  shortPercent: number | null
+  settlement: string | null
+  putCallVolume: number | null
+  putCallOpenInterest: number | null
+  note: string
+}
+
 /** This company against the largest other filers in its SIC code. Not an input to the stars. */
 export type FieldBrief = {
   sic: string | null
@@ -247,6 +262,7 @@ export type Report = {
   gaps: string[]
   sector: SectorBrief
   field: FieldBrief
+  positioning: Positioning
   /** True when this pass ignored the saved facts, annual report, and proxy. */
   pulledFresh: boolean
 }

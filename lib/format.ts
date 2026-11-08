@@ -41,6 +41,16 @@ export function money(n: number | null, currency = "USD"): string {
   return `${sign}${mark}${abs.toFixed(0)}`
 }
 
+export function count(n: number | null): string {
+  if (n == null || !Number.isFinite(n)) return "—"
+  const sign = n < 0 ? "−" : ""
+  const abs = Math.abs(n)
+  if (abs >= 1e9) return `${sign}${(abs / 1e9).toFixed(2)}B`
+  if (abs >= 1e6) return `${sign}${(abs / 1e6).toFixed(1)}M`
+  if (abs >= 1e3) return `${sign}${(abs / 1e3).toFixed(1)}k`
+  return `${sign}${abs.toFixed(0)}`
+}
+
 export function price(n: number | null, currency = "USD"): string {
   if (n == null || !Number.isFinite(n)) return "—"
   const sign = n < 0 ? "−" : ""

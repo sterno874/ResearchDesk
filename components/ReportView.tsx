@@ -1,7 +1,7 @@
 import { Pips } from "@/components/Pips"
-import { gap, money, plainPct, price, ratio, when } from "@/lib/format"
+import { count, gap, money, pct, plainPct, price, ratio, when } from "@/lib/format"
 import { shorthand } from "@/lib/rank"
-import type { FieldBrief, InvestorScore, Metrics, Part, Report, SectorBrief, Trap } from "@/lib/types"
+import type { FieldBrief, InvestorScore, Metrics, Part, Positioning, Report, SectorBrief, Trap } from "@/lib/types"
 
 function tone(score: number | null): "helps" | "hurts" | "mixed" {
   if (score == null) return "mixed"
@@ -167,6 +167,27 @@ function FieldSection({ field }: { field: FieldBrief }) {
   )
 }
 
+function PositioningSection({ positioning }: { positioning: Positioning }) {
+  const cells = [
+    metric("Short interest", count(positioning.shortInterest)),
+    metric("Vs prior settlement", pct(positioning.shortChange, 1)),
+    metric("Days to cover", positioning.daysToCover == null ? "—" : ratio(positioning.daysToCover, 1)),
+    metric("Short / shares", plainPct(positioning.shortPercent, 1)),
+    metric("Put / call volume", ratio(positioning.putCallVolume)),
+    metric("Put / call open interest", ratio(positioning.putCallOpenInterest)),
+  ]
+  return (
+    <section className="section">
+      <div className="section-head">
+        <h2>Positioning</h2>
+        <span className="eyebrow">{positioning.settlement ? `Settlement ${when(positioning.settlement)}` : "Nasdaq"}</span>
+      </div>
+      <div className="metrics">{cells}</div>
+      <p className="vintage">{positioning.note}</p>
+    </section>
+  )
+}
+
 function metric(label: string, value: string) {
   return (
     <div className="metric" key={label}>
@@ -263,6 +284,8 @@ export function ReportView({ report }: { report: Report }) {
               : "Return on capital is after-tax operating income over equity plus debt minus cash. Free cash flow is cash from operations minus capital spending. Book is accounting equity, not a liquidation value."}
         </p>
       </section>
+
+      {report.positioning ? <PositioningSection positioning={report.positioning} /> : null}
 
       <FieldSection field={report.field} />
 

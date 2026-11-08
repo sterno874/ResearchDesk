@@ -6,6 +6,7 @@ import { readAnnual, readOverview } from "./ixbrl"
 import { mergePeople, readFilingPeople, readPeople } from "./people"
 import { scoreAll } from "./investors"
 import { getQuote } from "./market"
+import { loadPositioning } from "./positioning"
 import { buildMetrics } from "./metrics"
 import { buildHeadline, buildMemo, buildPitch } from "./narrative"
 import { loadFacts, loadSubmissions, loadUniverse, normalizeTicker } from "./sec"
@@ -59,6 +60,7 @@ export const getReport = cache(async (raw: string, fresh = false): Promise<Repor
     }
   }
 
+  const positioningPromise = loadPositioning(company.ticker)
   const [factsResult, submissionsResult, quoteResult, annualResult, proxyResult] = await Promise.allSettled([
     loadFacts(company.cik, fresh),
     loadSubmissions(company.cik),
@@ -99,6 +101,10 @@ export const getReport = cache(async (raw: string, fresh = false): Promise<Repor
     }),
   ])
   const sector = describeSector(id, metrics, trials.studies, trials.note)
+  const positioning = await positioningPromise.catch(() => null)
+  if (positioning && metrics.shares != null && metrics.shares > 0 && positioning.shortInterest != null) {
+    positioning.shortPercent = positioning.shortInterest / metrics.shares
+  }
   const draft = buildMemo(metrics, id)
   const annualHtml = annualResult.status === "fulfilled" && annualResult.value ? annualResult.value.html : ""
   const traps = buildTraps({
@@ -144,6 +150,17 @@ export const getReport = cache(async (raw: string, fresh = false): Promise<Repor
     gaps,
     sector,
     field,
+    positioning: positioning ?? {
+      shortInterest: null,
+      shortPrior: null,
+      shortChange: null,
+      daysToCover: null,
+      shortPercent: null,
+      settlement: null,
+      putCallVolume: null,
+      putCallOpenInterest: null,
+      note: "Nasdaq did not return short interest or an option chain for this ticker.",
+    },
     pulledFresh: fresh,
   }
   await saveRead({ ...shorthand(report), readAt: new Date().toISOString() }).catch(() => undefined)
