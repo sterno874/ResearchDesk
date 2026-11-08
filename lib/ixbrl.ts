@@ -71,7 +71,7 @@ function annualSpan(start: string, end: string): boolean {
 
 function kindOf(name: string): { kind: Kind; rank: number; ebitdaLabel: string | null } | null {
   const local = localName(name)
-  if (local === "Revenues") return { kind: "revenue", rank: 3, ebitdaLabel: null }
+  if (local === "Revenues" || local === "RevenuesNetOfInterestExpense") return { kind: "revenue", rank: 3, ebitdaLabel: null }
   if (local.startsWith("RevenueFromContractWithCustomer")) return { kind: "revenue", rank: 2, ebitdaLabel: null }
   if (/AdjustedEarningsBeforeInterestTaxesDepreciation/i.test(local)) {
     return { kind: "ebitda", rank: 3, ebitdaLabel: "Adjusted EBITDA" }
