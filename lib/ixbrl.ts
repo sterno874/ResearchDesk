@@ -417,6 +417,51 @@ const BORROWING_LINES: Record<string, string> = {
   NonCurrentExchangeableBonds: "exchangeable bonds",
 }
 
+const INVESTMENT_LINES = [
+  "ShortTermInvestments",
+  "ShortTermInvestmentsBankTimeDepositsAndOtherShortTermInvestments",
+  "MarketableSecuritiesCurrent",
+]
+
+/** Short-term investments in USD on the statement, when the filing feed only has them in another currency. */
+export function statedInvestments(html: string, anchor: string | null): number | null {
+  if (!html || !anchor) return null
+  const plain = new Set<string>()
+  for (const match of html.matchAll(/<xbrli:context\s+id="([^"]+)"[^>]*>([\s\S]*?)<\/xbrli:context>/g)) {
+    const body = match[2] ?? ""
+    if (/<xbrldi:explicitMember\b/.test(body)) continue
+    const instant = body.match(/<xbrli:instant>([^<]+)<\/xbrli:instant>/)
+    if (instant?.[1] === anchor) plain.add(match[1])
+  }
+  if (!plain.size) return null
+  const usd = new Set<string>()
+  for (const match of html.matchAll(/<xbrli:unit\s+id="([^"]+)"[^>]*>([\s\S]*?)<\/xbrli:unit>/g)) {
+    const measure = match[2] ?? ""
+    if (/iso4217:USD</.test(measure) && !/iso4217:[A-Z]{3}</.test(measure.replace("iso4217:USD", ""))) usd.add(match[1])
+  }
+  const found = new Map<string, number>()
+  for (const match of html.matchAll(/<ix:nonFraction\b([^>]*)>([^<]*)<\/ix:nonFraction>/g)) {
+    const attrs = match[1] ?? ""
+    const name = attrs.match(/\bname="[^"]*:([^"]+)"/)?.[1]
+    if (!name || !INVESTMENT_LINES.includes(name)) continue
+    const context = attrs.match(/\bcontextRef="([^"]+)"/)?.[1]
+    const unit = attrs.match(/\bunitRef="([^"]+)"/)?.[1]
+    if (!context || !plain.has(context) || !unit || !usd.has(unit)) continue
+    const scale = Number(attrs.match(/\bscale="(-?\d+)"/)?.[1] ?? "0")
+    const value = Number((match[2] ?? "").replace(/,/g, ""))
+    if (!Number.isFinite(value) || value <= 0 || !Number.isFinite(scale)) continue
+    const amount = value * 10 ** scale
+    const prior = found.get(name)
+    if (prior != null && Math.abs(prior - amount) / Math.max(prior, amount) > 0.02) return null
+    found.set(name, amount)
+  }
+  for (const name of INVESTMENT_LINES) {
+    const amount = found.get(name)
+    if (amount != null) return amount
+  }
+  return null
+}
+
 /** Borrowings the filing states as separate lines when it never tags one total. */
 export function instrumentBorrowings(html: string, anchor: string | null): { total: number; lines: string[] } | null {
   if (!html || !anchor) return null

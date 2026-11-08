@@ -212,6 +212,13 @@ function rawPoints(facts: CompanyFacts, name: string): SecPoint[] {
   return resolveTag(facts, name)?.points ?? []
 }
 
+/** Unit of the series this desk would read. Null when the tag is missing or is not a currency. */
+export function tagCurrency(facts: CompanyFacts, name: string): string | null {
+  const found = resolveTag(facts, name)
+  if (!found || !/^[A-Z]{3}$/.test(found.unit)) return null
+  return found.unit
+}
+
 /** Currency of the revenue series actually used. Null when the tag is missing or is not a currency. */
 export function reportingCurrency(facts: CompanyFacts, names: string[]): string | null {
   let bestEnd = ""

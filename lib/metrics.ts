@@ -1,4 +1,4 @@
-import { annualSeries, readFilings, reportingCurrency, revenueSeries, type Company, type CompanyFacts, type Submissions } from "./sec"
+import { annualSeries, readFilings, reportingCurrency, revenueSeries, tagCurrency, type Company, type CompanyFacts, type Submissions } from "./sec"
 import { cv, median } from "./stats"
 import type { Metrics, Quote, YearPoint } from "./types"
 import type { AnnualPoint } from "./sec"
@@ -223,19 +223,36 @@ function readDebt(facts: CompanyFacts, anchor: string | null): { debt: number; s
   return { debt: core + extra, stale: false, filed: true }
 }
 
-function readLiquid(facts: CompanyFacts, anchor: string | null): number | null {
-  const combined = onAnchor(facts, "CashCashEquivalentsAndShortTermInvestments", "instant", anchor)
+const SECURITY_TAGS = [
+  "ShortTermInvestments",
+  "MarketableSecuritiesCurrent",
+  "AvailableForSaleSecuritiesCurrent",
+  "AvailableForSaleSecuritiesDebtMaturitiesWithinOneYearFairValue",
+]
+
+function inCurrency(facts: CompanyFacts, name: string, anchor: string | null, currency: string | null): number | null {
+  const unit = tagCurrency(facts, name)
+  if (currency && unit && unit !== currency) return null
+  return onAnchor(facts, name, "instant", anchor)
+}
+
+function readLiquid(facts: CompanyFacts, anchor: string | null, currency: string | null): number | null {
+  const combined = inCurrency(facts, "CashCashEquivalentsAndShortTermInvestments", anchor, currency)
   if (combined != null) return combined
-  const cash = onAnchor(facts, "CashAndCashEquivalentsAtCarryingValue", "instant", anchor)
-    ?? onAnchor(facts, "Cash", "instant", anchor)
-  const securities = onAnchor(facts, "ShortTermInvestments", "instant", anchor)
-    ?? onAnchor(facts, "MarketableSecuritiesCurrent", "instant", anchor)
-    ?? onAnchor(facts, "AvailableForSaleSecuritiesCurrent", "instant", anchor)
-    ?? onAnchor(facts, "AvailableForSaleSecuritiesDebtMaturitiesWithinOneYearFairValue", "instant", anchor)
+  const cash = inCurrency(facts, "CashAndCashEquivalentsAtCarryingValue", anchor, currency)
+    ?? inCurrency(facts, "Cash", anchor, currency)
+  const securities = SECURITY_TAGS.reduce<number | null>((found, name) => found ?? inCurrency(facts, name, anchor, currency), null)
   if (cash != null) return cash + Math.max(securities ?? 0, 0)
-  const restricted = onAnchor(facts, "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents", "instant", anchor)
+  const restricted = inCurrency(facts, "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents", anchor, currency)
   if (restricted == null && securities == null) return null
   return (restricted ?? 0) + Math.max(securities ?? 0, 0)
+}
+
+/** True when cash is separate and the statement currency has no short-term investment tag on this statement. */
+export function investmentsMissing(facts: CompanyFacts, anchor: string | null, currency: string | null): boolean {
+  if (!currency || !anchor) return false
+  if (inCurrency(facts, "CashCashEquivalentsAndShortTermInvestments", anchor, currency) != null) return false
+  return SECURITY_TAGS.every((name) => inCurrency(facts, name, anchor, currency) == null)
 }
 
 export function buildMetrics(input: {
@@ -293,7 +310,7 @@ export function buildMetrics(input: {
   const fiscalAnchor = revenuePts[0]?.end ?? incomePts[0]?.end ?? cfoPts[0]?.end ?? null
   const debtRead = readDebt(facts, fiscalAnchor)
   let debt = debtRead.debt
-  const liquid = readLiquid(facts, fiscalAnchor)
+  const liquid = readLiquid(facts, fiscalAnchor, statementCurrency)
 
   const revenueMap = byEnd(revenuePts)
   const incomeMap = byEnd(incomePts)
@@ -687,6 +704,33 @@ export function applyStatedCapex(metrics: Metrics, capex: number | null): Metric
 }
 
 const STALE_DEBT = "The debt figure in the filing feed is from a different statement than the latest results, so it was left blank."
+
+/** Add the short-term investments the balance sheet states in the statement currency. */
+export function applyStatedInvestments(metrics: Metrics, amount: number | null): Metrics {
+  if (amount == null || !(amount > 0) || metrics.cash == null) return metrics
+  if (metrics.revenue != null && amount > metrics.revenue * 2) return metrics
+  const cash = metrics.cash + amount
+  const aligned = metrics.statementCurrency == null || metrics.statementCurrency === metrics.currency
+  const enterpriseValue = !aligned || metrics.marketCap == null || metrics.debt == null
+    ? null
+    : metrics.marketCap + metrics.debt - cash
+  const capital = metrics.equity != null && metrics.debt != null ? metrics.equity + metrics.debt - cash : null
+  return {
+    ...metrics,
+    cash,
+    enterpriseValue,
+    earningsYield: aligned && metrics.operatingIncome != null && enterpriseValue != null && enterpriseValue > 0
+      ? metrics.operatingIncome / enterpriseValue
+      : null,
+    roic: metrics.operatingIncome != null && capital != null && capital > 0
+      ? (metrics.operatingIncome * 0.79) / capital
+      : null,
+    warnings: [
+      ...metrics.warnings,
+      "Short-term investments were not tagged in the statement currency. Cash includes the short-term investments on the balance sheet.",
+    ],
+  }
+}
 
 /** The statement lists the borrowings and never tags one total. */
 export function applyInstrumentDebt(metrics: Metrics, borrowing: { total: number; lines: string[] } | null): Metrics {

@@ -2,12 +2,12 @@ import { cache } from "react"
 import { loadField } from "./field"
 import { loadAnnual, loadProxy } from "./filingdoc"
 import { htmlToText } from "./plain"
-import { instrumentBorrowings, readAnnual, readOverview } from "./ixbrl"
+import { instrumentBorrowings, readAnnual, readOverview, statedInvestments } from "./ixbrl"
 import { mergePeople, readFilingPeople, readPeople } from "./people"
 import { scoreAll } from "./investors"
 import { getQuote } from "./market"
 import { loadPositioning } from "./positioning"
-import { applyInstrumentDebt, applyStatedCapex, buildMetrics, quoteOnDepositary, statedCapitalSpending } from "./metrics"
+import { applyInstrumentDebt, applyStatedCapex, applyStatedInvestments, buildMetrics, investmentsMissing, quoteOnDepositary, statedCapitalSpending } from "./metrics"
 import { buildHeadline, buildMemo, buildPitch } from "./narrative"
 import { loadFacts, loadSubmissions, loadUniverse, normalizeTicker } from "./sec"
 import { describeSector, loadStudies, sectorId, takesDeposits } from "./sector"
@@ -87,6 +87,9 @@ export const getReport = cache(async (raw: string, fresh = false): Promise<Repor
     statedCapitalSpending(annualText),
   )
   metrics = applyInstrumentDebt(metrics, instrumentBorrowings(annualHtml, metrics.fiscalEnd))
+  if (investmentsMissing(factsResult.value, metrics.fiscalEnd, metrics.statementCurrency)) {
+    metrics = applyStatedInvestments(metrics, statedInvestments(annualHtml, metrics.fiscalEnd))
+  }
   if (metrics.revenue == null && metrics.netIncome == null && metrics.equity == null) {
     return {
       ok: false,
