@@ -432,9 +432,18 @@ function categoryUnit(annual: AnnualRead, report: Report): string {
     if (serviceMargin > productMargin) text += " The services line is the richer margin."
   }
   text += " Units sold, and the price of one unit, are not in the filing. A growth rate here is still a blend of volume and price."
+  const company = report.metrics.revenue
+  const productSales = products?.revenue
+  const serviceSales = services?.revenue
+  const groupsCoverCompany = productSales != null && serviceSales != null && company != null && company > 0
+    && productSales > 0
+    && sameMoney(products?.currency, report)
+    && sameMoney(services?.currency, report)
+    && Math.abs(total - productSales) / productSales <= 0.05
+    && Math.abs(productSales + serviceSales - company) / company <= 0.05
   if (lead && !sameMoney(lead.currency, report)) {
     text += ` These lines are in ${books(lead.currency)}. Consolidated revenue is in ${statedIn(report)}, and the filing did not give a rate, so this is not a share of that total.`
-  } else if (report.metrics.revenue && total && Math.abs(total - report.metrics.revenue) / report.metrics.revenue > 0.05) {
+  } else if (!groupsCoverCompany && company && total && Math.abs(total - company) / company > 0.05) {
     text += " The category tags do not add up to the consolidated revenue, so the split is incomplete."
   }
   return text
