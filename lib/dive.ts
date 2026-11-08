@@ -258,7 +258,10 @@ function businessLayer(report: Report, annual: AnnualRead | null, warnings: stri
       caption: sameMoney(segments[0]?.currency, report) ? `${latest}, from the segment footnote` : `${latest}, from the segment footnote, in ${books(segments[0]?.currency)}`,
       columns: ["Segment", "Revenue", "Share", ebitda, "Margin"],
       rows: segments.map((row) => {
-        const share = sameMoney(row.currency, report) && report.metrics.revenue ? (row.revenue ?? 0) / report.metrics.revenue : null
+        const pool = sameMoney(row.currency, report)
+          ? report.metrics.revenue
+          : segments.reduce((sum, line) => books(line.currency) === books(row.currency) ? sum + (line.revenue ?? 0) : sum, 0)
+        const share = pool ? (row.revenue ?? 0) / pool : null
         return [row.segment, cash(row.revenue, row.currency), plainPct(share, 0), cash(row.ebitda, row.currency), plainPct(row.margin, 0)]
       }),
     })

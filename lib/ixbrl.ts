@@ -34,10 +34,12 @@ function localName(value: string): string {
 
 function words(member: string): string {
   const stem = localName(member)
+    .replace(/SegmentsMember$/, "")
     .replace(/GroupSegmentMember$/, "")
     .replace(/SegmentMember$/, "")
     .replace(/Member$/, "")
   return stem
+    .replace(/([a-z])(E-)/g, "$1 $2")
     .replace(/^IPhone$/, "iPhone")
     .replace(/^IPad$/, "iPad")
     .replace(/([a-z])and(?=[A-Z])/g, "$1 and ")
@@ -55,6 +57,9 @@ function words(member: string): string {
     .replace(/\bYou Tube\b/g, "YouTube")
     .replace(/\bPay Pal\b/g, "PayPal")
     .replace(/\bGit Hub\b/g, "GitHub")
+    .replace(/\bMc Lane\b/g, "McLane")
+    .replace(/\bSams\b/g, "Sam's")
+    .replace(/\bA\.Pacific\b/g, "Asia Pacific")
     .replace(/\s+/g, " ")
     .trim()
 }
@@ -107,7 +112,19 @@ function attrs(source: string): Record<string, string> {
 
 function isSegmentMember(member: Member): boolean {
   const name = localName(member.name)
-  return /SegmentMember$/.test(name) && !/SegmentsMember$/.test(name) && !/^OperatingSegmentsMember$/.test(name)
+  const dimension = localName(member.dimension)
+  if (/ProductOrServiceAxis|StatementGeographicalAxis|ConsolidationItemsAxis/.test(dimension)) return false
+  if (isSkipped(member)) return false
+  if (/SegmentMember$/.test(name) && !/^(OperatingSegments|ReportableSegments|Segments)Member$/.test(name)) return true
+  return dimension === "StatementBusinessSegmentsAxis" && /Member$/.test(name)
+}
+
+/** A subsegment is the line. The parent brand on the same fact is the rollup. */
+function pickSegment(members: Member[]): Member | undefined {
+  const found = members.filter(isSegmentMember)
+  return found.find((member) => /SubsegmentsAxis$/.test(localName(member.dimension)))
+    ?? found.find((member) => localName(member.dimension) === "StatementBusinessSegmentsAxis")
+    ?? found[0]
 }
 
 function isChannel(member: Member): boolean {
@@ -121,8 +138,42 @@ function channelLabel(member: Member): string {
   return words(member.name)
 }
 
+function closeMoney(a: number, b: number): boolean {
+  const scale = Math.max(Math.abs(a), Math.abs(b), 1)
+  return Math.abs(a - b) / scale <= 0.015
+}
+
+/** A parent total, or the same segment tagged under two names, is not a second business. */
+function withoutRollups(lines: SegmentLine[], parents: Set<string>): SegmentLine[] {
+  const drop = new Set<SegmentLine>()
+  const years = new Set(lines.map((line) => line.year))
+  for (const year of years) {
+    const rows = lines.filter((line) => line.year === year && line.product == null && (line.revenue ?? 0) > 0)
+    for (const candidate of rows) {
+      if (parents.has(candidate.segment) || /excluding/i.test(candidate.segment)) {
+        drop.add(candidate)
+        continue
+      }
+      const covered = rows.filter((other) => other !== candidate && other.segment.length > 3 && candidate.segment.includes(other.segment))
+      if (covered.length >= 2) drop.add(candidate)
+    }
+    for (let i = 0; i < rows.length; i++) {
+      for (let j = i + 1; j < rows.length; j++) {
+        const left = rows[i]
+        const right = rows[j]
+        if (left.currency !== right.currency || left.revenue == null || right.revenue == null) continue
+        if (!closeMoney(left.revenue, right.revenue)) continue
+        const longer = left.segment.length >= right.segment.length ? left : right
+        const shorter = longer === left ? right : left
+        if (longer.segment.includes(shorter.segment)) drop.add(longer)
+      }
+    }
+  }
+  return lines.filter((line) => !drop.has(line))
+}
+
 function isSkipped(member: Member): boolean {
-  return /Intersegment|Elimination|Corporate|Reconciling|SingleReportable|^(Reportable|Primary)SegmentMember$/.test(localName(member.name))
+  return /Intersegment|Elimination|Corporate|Reconciling|SingleReportable|Aggregation|(^|[a-z])Total[A-Z]|TotalSegment|^(Reportable|Primary)SegmentMember$/.test(localName(member.name))
 }
 
 function isProduct(member: Member): boolean {
@@ -266,13 +317,19 @@ export function readAnnual(html: string): AnnualRead {
   }
 
   const slots = new Map<string, Slot>()
+  const parents = new Set<string>()
   for (const match of html.matchAll(/<ix:nonFraction\b([^>]*)>([^<]*)<\/ix:nonFraction>/g)) {
     const fact = attrs(match[1])
     const context = contexts.get(fact.contextRef || "")
     const meta = kindOf(fact.name || "")
     if (!context || !meta) continue
     if (context.members.some(isSkipped)) continue
-    const segmentMember = context.members.find(isSegmentMember)
+    const segmentMember = pickSegment(context.members)
+    if (segmentMember) {
+      for (const other of context.members) {
+        if (other !== segmentMember && isSegmentMember(other)) parents.add(words(other.name))
+      }
+    }
     const productMember = context.members.find(isProduct)
     const channelMember = context.members.find(isChannel)
     if (!segmentMember && !productMember && !channelMember) continue
@@ -323,7 +380,7 @@ export function readAnnual(html: string): AnnualRead {
     slots.set(key, slot)
   }
 
-  const lines: SegmentLine[] = [...slots.values()]
+  const lines: SegmentLine[] = withoutRollups([...slots.values()]
     .filter((slot) => (slot.revenue ?? 0) > 0 || (slot.ebitda ?? 0) !== 0)
     .map((slot) => ({
       segment: slot.segment,
@@ -335,7 +392,7 @@ export function readAnnual(html: string): AnnualRead {
       ebitdaLabel: slot.ebitdaLabel,
       direct: slot.direct,
       sga: slot.sga,
-    }))
+    })), parents)
 
   const plain = htmlToText(html)
   const item = readItem(plain)
