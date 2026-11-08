@@ -358,6 +358,13 @@ export function filingUrl(cik: string, adsh: string): string {
   return `https://www.sec.gov/Archives/edgar/data/${cikInt}/${accession}/${adsh}-index.html`
 }
 
+function filingLabel(form: string, description?: string): string {
+  const text = (description ?? "").trim()
+  if (text && text.toUpperCase() !== form.toUpperCase()) return text
+  if (/^SCHEDULE\b/i.test(form)) return form.replace(/^SCHEDULE/i, "Schedule")
+  return `Form ${form}`
+}
+
 export function readFilings(submissions: Submissions | null, cik: string): {
   filings: Filing[]
   schedule13d: boolean
@@ -376,8 +383,9 @@ export function readFilings(submissions: Submissions | null, cik: string): {
     const ageDays = date ? (now - Date.parse(date)) / 86400000 : 9999
     if (ageDays <= 180 && form.includes("13D")) schedule13d = true
     if (ageDays <= 120 && form === "4") insiderForms += 1
-    const show = /^(10-K|10-Q|8-K|4$|SC 13|SCHEDULE 13|DEF 14A)/.test(form)
+    const show = /^(10-K|10-Q|8-K|20-F|40-F|6-K|4$|3$|SC 13|SCHEDULE 13|DEF 14A)/.test(form)
     if (!show || filings.length >= 8) continue
+    if (form === "4" && filings.filter((filing) => filing.form === "4").length >= 2) continue
     const accession = recent.accessionNumber?.[i]
     const document = recent.primaryDocument?.[i]
     const cikInt = String(parseInt(padCik(cik), 10))
@@ -387,7 +395,7 @@ export function readFilings(submissions: Submissions | null, cik: string): {
     filings.push({
       form,
       date,
-      description: recent.primaryDocDescription?.[i] || form,
+      description: filingLabel(form, recent.primaryDocDescription?.[i]),
       items: recent.items?.[i] || "",
       url,
     })
