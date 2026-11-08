@@ -1,6 +1,6 @@
 import { money, plainPct, price, ratio } from "./format"
 import { round, scale } from "./stats"
-import type { InvestorScore, Metrics, Part } from "./types"
+import type { InvestorScore, Metrics, Part, SectorId } from "./types"
 
 const VERDICTS: Record<string, [string, string, string, string, string]> = {
   munger: ["Not his game", "He would pass", "Interested, with a condition", "He would take it seriously", "He would own it"],
@@ -534,7 +534,9 @@ function scoreSchloss(metrics: Metrics): InvestorScore {
       metrics.currentRatio == null ? "—" : `${ratio(metrics.currentRatio)} current ratio`,
       "A current ratio with room in it meant the assets were not all stuck in the plant."),
     part("assets", "Assets behind the price", 0.14, asset,
-      metrics.ncavPerShare == null ? "—" : `${price(metrics.ncavPerShare, metrics.currency)} net current assets per share`,
+      metrics.ncavPerShare != null && metrics.price != null && metrics.ncavPerShare > metrics.price
+        ? `${price(metrics.ncavPerShare, metrics.currency)} net current assets per share`
+        : metrics.pb == null ? "—" : `${ratio(metrics.pb, 1)}× book`,
       "Insider ownership is not in this feed, so it is not scored. He cared about it. The filing here can only show the assets."),
   ]
   return finish("schloss", "Walter Schloss", "A basket of cheap assets and low debt.", metrics, parts)
@@ -588,7 +590,73 @@ function scoreGreenblatt(metrics: Metrics): InvestorScore {
   return finish("greenblatt", "Joel Greenblatt", "High earnings yield and high return on capital.", metrics, parts, extra)
 }
 
-export function scoreAll(metrics: Metrics): InvestorScore[] {
+const BOOK_PARTS: Record<string, string[]> = {
+  munger: ["roc", "margin", "stability", "debt", "price"],
+  buffett: ["moat", "debt", "cash", "price"],
+  graham: ["current", "cover"],
+  klarman: ["ncav", "cash", "safety"],
+  schloss: ["debt", "current"],
+  greenblatt: ["yield", "roc"],
+}
+
+const TRUST_PARTS: Record<string, string[]> = {
+  munger: ["price"],
+  buffett: ["cash", "price"],
+  greenblatt: ["yield", "roc"],
+}
+
+function refusedNote(sector: SectorId, investorId: string, partId: string): string {
+  if (sector === "reit") {
+    return "Not scored. Free cash flow subtracts depreciation a property trust takes on purpose, and operating income is after that charge. This yield is the wrong price."
+  }
+  if (partId === "debt") {
+    return sector === "bank"
+      ? "Not scored. Borrowings over equity leave out the deposits, which are how a bank is funded. A low number here is the costume."
+      : "Not scored. Borrowings over equity are not the insurer's leverage. The reserves and the investment book are not in this ratio."
+  }
+  if (partId === "margin" || partId === "stability" || partId === "moat") {
+    return "Not scored. Gross margin is a product company's pricing power. This statement does not have that line in the sense the test uses."
+  }
+  if (partId === "ncav" || partId === "current" || partId === "cover" || partId === "safety") {
+    return sector === "bank"
+      ? "Not scored. Working capital and the Graham number are tests for an industrial company. They do not describe a loan book."
+      : "Not scored. Working capital and the Graham number do not describe an insurance book."
+  }
+  if (investorId === "klarman" && partId === "cash") {
+    return sector === "bank"
+      ? "Not scored. Cash minus borrowings ignores the deposits. It is not a pile of spare cash."
+      : "Not scored. Cash minus borrowings is not spare cash at an insurer. The reserves sit outside that sum."
+  }
+  if (partId === "roc" || partId === "yield") {
+    return `Not scored. Return on capital here is operating income over equity plus debt minus cash. That is not the capital of ${sector === "bank" ? "a bank" : "an insurer"}. The price that fits is book.`
+  }
+  return sector === "bank"
+    ? "Not scored. Cash from operations is not owner earnings for a bank. The price that fits this statement is book."
+    : "Not scored. Cash from operations is not owner earnings for an insurer. The price that fits this statement is book."
+}
+
+function censor(investor: InvestorScore, metrics: Metrics, sector: SectorId): InvestorScore {
+  const ids = sector === "bank" || sector === "insurer"
+    ? BOOK_PARTS[investor.id] ?? []
+    : sector === "reit"
+      ? TRUST_PARTS[investor.id] ?? []
+      : []
+  if (!ids.length) return investor
+  const parts = investor.parts.map((item) => ids.includes(item.id)
+    ? { ...item, score: null, reading: "—", note: refusedNote(sector, investor.id, item.id) }
+    : item)
+  const next = finish(investor.id, investor.name, investor.era, metrics, parts)
+  if (next.score != null) return next
+  const note = refusedNote(sector, investor.id, ids[0] ?? "")
+  return {
+    ...next,
+    verdict: "Not this statement",
+    summary: note,
+    deciding: "The parts that would have used the wrong statement were left blank.",
+  }
+}
+
+export function scoreAll(metrics: Metrics, sector: SectorId = "operating"): InvestorScore[] {
   return [
     scoreMunger(metrics),
     scoreBuffett(metrics),
@@ -596,5 +664,5 @@ export function scoreAll(metrics: Metrics): InvestorScore[] {
     scoreKlarman(metrics),
     scoreSchloss(metrics),
     scoreGreenblatt(metrics),
-  ]
+  ].map((investor) => censor(investor, metrics, sector))
 }

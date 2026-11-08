@@ -81,10 +81,10 @@ export const getReport = cache(async (raw: string): Promise<ReportResult> => {
       message: `${company.name} files with the SEC, but the annual statements this desk needs are missing from the XBRL feed.`,
     }
   }
-  const investors = scoreAll(metrics).sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
   const submissions = submissionsResult.status === "fulfilled" ? submissionsResult.value : null
   const filedAs = sectorId(submissions?.sic ?? null, submissions?.sicDescription ?? null)
   const id = filedAs === "operating" && takesDeposits(factsResult.value) ? "bank" : filedAs
+  const investors = scoreAll(metrics, id).sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
   const trials = await loadStudies(id, company.name, company.cik)
   const sector = describeSector(id, metrics, trials.studies, trials.note)
   const draft = buildMemo(metrics, id)
