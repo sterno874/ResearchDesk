@@ -7,10 +7,6 @@ function byEnd(points: AnnualPoint[]): Map<string, number> {
   return new Map(points.map((point) => [point.end, point.val]))
 }
 
-function latest(points: AnnualPoint[]): number | null {
-  return points[0]?.val ?? null
-}
-
 function change(latestValue: number | null, earlier: number | null): number | null {
   if (latestValue == null || earlier == null || earlier === 0) return null
   return latestValue / earlier - 1
@@ -115,6 +111,22 @@ function onStatement(end: string, anchor: string | null): boolean {
   if (!anchor) return true
   const gap = Math.abs(Date.parse(end) - Date.parse(anchor))
   return Number.isFinite(gap) && gap <= STATEMENT_DAYS * DAY_MS
+}
+
+function valueOnStatement(points: AnnualPoint[], anchor: string | null): number | null {
+  if (!points.length) return null
+  if (!anchor) return points[0].val
+  let best: AnnualPoint | null = null
+  let bestGap = Infinity
+  for (const point of points) {
+    const gap = Math.abs(Date.parse(point.end) - Date.parse(anchor))
+    if (!Number.isFinite(gap) || gap > STATEMENT_DAYS * DAY_MS) continue
+    if (gap < bestGap) {
+      best = point
+      bestGap = gap
+    }
+  }
+  return best?.val ?? null
 }
 
 function dated(facts: CompanyFacts, name: string, kind: "flow" | "instant"): AnnualPoint | null {
@@ -321,11 +333,11 @@ export function buildMetrics(input: {
   const operatingIncome = stated?.operatingIncome ?? null
   const grossRead = stated ? grossAt(stated.end, stated.revenue) : { value: null, derived: false }
   const grossProfit = grossRead.value
-  const equityStale = Boolean(equityPts[0] && !onStatement(equityPts[0].end, fiscalAnchor))
-  const equity = equityStale ? null : latest(equityPts)
-  const liabilitiesStale = Boolean(liabilityPts[0] && !onStatement(liabilityPts[0].end, fiscalAnchor))
-  const liabilities = liabilitiesStale ? null : latest(liabilityPts)
-  const assets = assetPts[0] && onStatement(assetPts[0].end, fiscalAnchor) ? assetPts[0].val : null
+  const equity = valueOnStatement(equityPts, fiscalAnchor)
+  const equityStale = equity == null && Boolean(equityPts[0])
+  const liabilities = valueOnStatement(liabilityPts, fiscalAnchor)
+  const liabilitiesStale = liabilities == null && Boolean(liabilityPts[0])
+  const assets = valueOnStatement(assetPts, fiscalAnchor)
   const deposits = onAnchor(facts, "Deposits", "instant", fiscalAnchor)
     ?? onAnchor(facts, "DepositsInterestBearing", "instant", fiscalAnchor)
   if (!debtRead.filed && debt === 0) {
@@ -338,20 +350,21 @@ export function buildMetrics(input: {
       warnings.push("Borrowings were not in the filing feed, and liabilities are most of the assets, so debt was left blank rather than treated as zero.")
     }
   }
-  const currentAssets = currentAssetPts[0] && onStatement(currentAssetPts[0].end, fiscalAnchor) ? currentAssetPts[0].val : null
-  const currentLiabilities = currentLiabilityPts[0] && onStatement(currentLiabilityPts[0].end, fiscalAnchor) ? currentLiabilityPts[0].val : null
-  const cfo = cfoPts[0] && onStatement(cfoPts[0].end, fiscalAnchor) ? cfoPts[0].val : null
-  const capexStale = Boolean(capexPts[0] && !onStatement(capexPts[0].end, fiscalAnchor))
+  const currentAssets = valueOnStatement(currentAssetPts, fiscalAnchor)
+  const currentLiabilities = valueOnStatement(currentLiabilityPts, fiscalAnchor)
+  const cfo = valueOnStatement(cfoPts, fiscalAnchor)
+  const capexOnStatement = valueOnStatement(capexPts, fiscalAnchor)
+  const capexStale = capexOnStatement == null && Boolean(capexPts[0])
   // No capital-spending tag is an unknown, not a year in which the company spent nothing.
   const capexMissing = capexPts.length === 0
-  const capex = capexPts[0] && onStatement(capexPts[0].end, fiscalAnchor) ? Math.abs(capexPts[0].val) : null
-  const eps = epsPts[0] && onStatement(epsPts[0].end, fiscalAnchor) ? epsPts[0].val : null
-  const shareOnStatement = sharePts[0] && onStatement(sharePts[0].end, fiscalAnchor) ? sharePts[0].val : null
-  const dilutedOnStatement = dilutedPts[0] && onStatement(dilutedPts[0].end, fiscalAnchor) ? dilutedPts[0].val : null
+  const capex = capexOnStatement == null ? null : Math.abs(capexOnStatement)
+  const eps = valueOnStatement(epsPts, fiscalAnchor)
+  const shareOnStatement = valueOnStatement(sharePts, fiscalAnchor)
+  const dilutedOnStatement = valueOnStatement(dilutedPts, fiscalAnchor)
   const dilutedIsNewer = shareOnStatement == null && dilutedOnStatement != null
   const shares = shareOnStatement ?? dilutedOnStatement
-  const dps = dpsPts[0] && onStatement(dpsPts[0].end, fiscalAnchor) ? dpsPts[0].val : null
-  const dividends = dividendPts[0] && onStatement(dividendPts[0].end, fiscalAnchor) ? dividendPts[0].val : null
+  const dps = valueOnStatement(dpsPts, fiscalAnchor)
+  const dividends = valueOnStatement(dividendPts, fiscalAnchor)
 
   const price = quote?.price ?? null
   const currency = quote?.currency ?? "USD"
