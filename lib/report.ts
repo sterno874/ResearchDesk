@@ -2,12 +2,12 @@ import { cache } from "react"
 import { loadField } from "./field"
 import { loadAnnual, loadProxy } from "./filingdoc"
 import { htmlToText } from "./plain"
-import { readAnnual, readOverview } from "./ixbrl"
+import { instrumentBorrowings, readAnnual, readOverview } from "./ixbrl"
 import { mergePeople, readFilingPeople, readPeople } from "./people"
 import { scoreAll } from "./investors"
 import { getQuote } from "./market"
 import { loadPositioning } from "./positioning"
-import { applyStatedCapex, buildMetrics, quoteOnDepositary, statedCapitalSpending } from "./metrics"
+import { applyInstrumentDebt, applyStatedCapex, buildMetrics, quoteOnDepositary, statedCapitalSpending } from "./metrics"
 import { buildHeadline, buildMemo, buildPitch } from "./narrative"
 import { loadFacts, loadSubmissions, loadUniverse, normalizeTicker } from "./sec"
 import { describeSector, loadStudies, sectorId, takesDeposits } from "./sector"
@@ -74,7 +74,7 @@ export const getReport = cache(async (raw: string, fresh = false): Promise<Repor
   }
   const annualHtml = annualResult.status === "fulfilled" && annualResult.value ? annualResult.value.html : ""
   const annualText = annualHtml ? htmlToText(annualHtml) : ""
-  const metrics = applyStatedCapex(
+  let metrics = applyStatedCapex(
     quoteOnDepositary(
       buildMetrics({
         company,
@@ -86,6 +86,7 @@ export const getReport = cache(async (raw: string, fresh = false): Promise<Repor
     ),
     statedCapitalSpending(annualText),
   )
+  metrics = applyInstrumentDebt(metrics, instrumentBorrowings(annualHtml, metrics.fiscalEnd))
   if (metrics.revenue == null && metrics.netIncome == null && metrics.equity == null) {
     return {
       ok: false,

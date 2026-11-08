@@ -686,6 +686,39 @@ export function applyStatedCapex(metrics: Metrics, capex: number | null): Metric
   }
 }
 
+const STALE_DEBT = "The debt figure in the filing feed is from a different statement than the latest results, so it was left blank."
+
+/** The statement lists the borrowings and never tags one total. */
+export function applyInstrumentDebt(metrics: Metrics, borrowing: { total: number; lines: string[] } | null): Metrics {
+  if (borrowing == null || metrics.debt != null || !(borrowing.total > 0)) return metrics
+  if (metrics.liabilities != null && borrowing.total > metrics.liabilities * 1.02) return metrics
+  const debt = borrowing.total
+  const aligned = metrics.statementCurrency == null || metrics.statementCurrency === metrics.currency
+  const enterpriseValue = !aligned || metrics.marketCap == null || metrics.cash == null
+    ? null
+    : metrics.marketCap + debt - metrics.cash
+  const capital = metrics.equity != null && metrics.cash != null ? metrics.equity + debt - metrics.cash : null
+  const listed = borrowing.lines.length === 1
+    ? borrowing.lines[0]
+    : `${borrowing.lines.slice(0, -1).join(", ")} and ${borrowing.lines[borrowing.lines.length - 1]}`
+  return {
+    ...metrics,
+    debt,
+    enterpriseValue,
+    earningsYield: aligned && metrics.operatingIncome != null && enterpriseValue != null && enterpriseValue > 0
+      ? metrics.operatingIncome / enterpriseValue
+      : null,
+    roic: metrics.operatingIncome != null && capital != null && capital > 0
+      ? (metrics.operatingIncome * 0.79) / capital
+      : null,
+    debtToEquity: metrics.equity != null && metrics.equity > 0 ? debt / metrics.equity : null,
+    warnings: [
+      ...metrics.warnings.filter((line) => line !== STALE_DEBT),
+      `Debt is the ${listed} on the statement. The filing did not tag a single borrowings total.`,
+    ],
+  }
+}
+
 /** The quote is one ADS. Earnings that tie to the ordinary count are restated per ADS. */
 export function quoteOnDepositary(metrics: Metrics, ratio: number | null): Metrics {
   if (ratio == null || ratio < 2 || metrics.shares == null || metrics.shares <= 0 || metrics.eps == null || metrics.netIncome == null || metrics.netIncome === 0) {

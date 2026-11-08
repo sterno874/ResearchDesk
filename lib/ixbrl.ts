@@ -409,6 +409,55 @@ function categoryDrivers(plain: string): string[] {
     .slice(0, 6)
 }
 
+const BORROWING_LINES: Record<string, string> = {
+  SeniorLongTermNotes: "senior notes",
+  ConvertibleDebtNoncurrent: "convertible notes",
+  LongTermLoansFromBank: "non-current bank loans",
+  BankBorrowingsCurrent: "current bank loans",
+  NonCurrentExchangeableBonds: "exchangeable bonds",
+}
+
+/** Borrowings the filing states as separate lines when it never tags one total. */
+export function instrumentBorrowings(html: string, anchor: string | null): { total: number; lines: string[] } | null {
+  if (!html || !anchor) return null
+  const plain = new Set<string>()
+  const contextRe = /<xbrli:context\s+id="([^"]+)"[^>]*>([\s\S]*?)<\/xbrli:context>/g
+  for (const match of html.matchAll(contextRe)) {
+    const body = match[2] ?? ""
+    if (/<xbrldi:explicitMember\b/.test(body)) continue
+    const instant = body.match(/<xbrli:instant>([^<]+)<\/xbrli:instant>/)
+    if (instant?.[1] === anchor) plain.add(match[1])
+  }
+  if (!plain.size) return null
+  const usd = new Set<string>()
+  const unitRe = /<xbrli:unit\s+id="([^"]+)"[^>]*>([\s\S]*?)<\/xbrli:unit>/g
+  for (const match of html.matchAll(unitRe)) {
+    const measure = match[2] ?? ""
+    if (/iso4217:USD</.test(measure) && !/iso4217:[A-Z]{3}</.test(measure.replace("iso4217:USD", ""))) usd.add(match[1])
+  }
+  const found = new Map<string, number>()
+  const factRe = /<ix:nonFraction\b([^>]*)>([^<]*)<\/ix:nonFraction>/g
+  for (const match of html.matchAll(factRe)) {
+    const attrs = match[1] ?? ""
+    const name = attrs.match(/\bname="[^"]*:([^"]+)"/)?.[1]
+    const label = name ? BORROWING_LINES[name] : undefined
+    if (!label) continue
+    const context = attrs.match(/\bcontextRef="([^"]+)"/)?.[1]
+    const unit = attrs.match(/\bunitRef="([^"]+)"/)?.[1]
+    if (!context || !plain.has(context) || !unit || !usd.has(unit)) continue
+    const scale = Number(attrs.match(/\bscale="(-?\d+)"/)?.[1] ?? "0")
+    const value = Number((match[2] ?? "").replace(/,/g, ""))
+    if (!Number.isFinite(value) || value <= 0 || !Number.isFinite(scale)) continue
+    const amount = value * 10 ** scale
+    const prior = found.get(label)
+    if (prior != null && Math.abs(prior - amount) / Math.max(prior, amount) > 0.02) return null
+    found.set(label, amount)
+  }
+  if (!found.size) return null
+  const total = [...found.values()].reduce((sum, amount) => sum + amount, 0)
+  return total > 0 ? { total, lines: [...found.keys()] } : null
+}
+
 /** The first real sentence of the business section. Used at the top of a report, before any score. */
 export function readOverview(html: string): string {
   const plain = htmlToText(html).replace(/[•●▪◦]/g, " ")
