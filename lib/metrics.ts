@@ -364,6 +364,14 @@ export function buildMetrics(input: {
       warnings.push("Borrowings were not drawn. Debt is the operating lease liability on the balance sheet.")
     }
   }
+  if (debt != null) {
+    const financeLease = onAnchor(facts, "FinanceLeaseLiability", "instant", fiscalAnchor)
+    // A finance lease larger than the borrowings cannot already be inside that borrowings line.
+    if (financeLease != null && financeLease > debt * 1.02) {
+      debt += financeLease
+      warnings.push("Debt includes the finance lease liability. That lease is larger than the borrowings on the same statement.")
+    }
+  }
   const currentAssets = valueOnStatement(currentAssetPts, fiscalAnchor)
   const currentLiabilities = valueOnStatement(currentLiabilityPts, fiscalAnchor)
   const cfo = valueOnStatement(cfoPts, fiscalAnchor)
