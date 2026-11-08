@@ -101,6 +101,7 @@ function kindOf(name: string): { kind: Kind; rank: number; ebitdaLabel: string |
     return { kind: "ebitda", rank: 0, ebitdaLabel: "EBIT" }
   }
   if (local === "Contribution") return { kind: "ebitda", rank: 0, ebitdaLabel: "Contribution" }
+  if (local === "GrossProfit") return { kind: "ebitda", rank: -1, ebitdaLabel: "Gross profit" }
   if (
     local === "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest" ||
     local === "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments"
@@ -386,7 +387,7 @@ export function readAnnual(html: string): AnnualRead {
       revenue: null,
       revenueRank: 0,
       ebitda: null,
-      ebitdaRank: 0,
+      ebitdaRank: -1,
       ebitdaLabel: null,
       direct: null,
       sga: null,
