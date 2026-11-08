@@ -267,10 +267,14 @@ function scoreBuffett(metrics: Metrics): InvestorScore {
       ])
   const parts = [
     part("roe", "Return on equity", 0.2, roe,
-      metrics.roeAvg == null ? "—" : `${plainPct(metrics.roeAvg, 0)} average, recent years`,
-      metrics.roe != null && metrics.roe > 0.4
-        ? `Latest year is ${plainPct(metrics.roe, 0)}. A very high ROE often means equity was paid out, not that the business suddenly got twice as good. The average is the fairer reading.`
-        : "He looked for a business that could keep earning a high return on the equity left inside it."),
+      metrics.roeAvg == null
+        ? metrics.roe != null && metrics.roe > 1 ? "Book is below one year of earnings" : "—"
+        : `${plainPct(metrics.roeAvg, 0)} average, recent years`,
+      metrics.roe != null && metrics.roe > 1
+        ? `Latest year is ${plainPct(metrics.roe, 0)} only because earnings exceed the equity. The book was paid down. Years like that are left out of the average.`
+        : metrics.roe != null && metrics.roe > 0.4
+          ? `Latest year is ${plainPct(metrics.roe, 0)}. A very high ROE often means equity was paid out, not that the business suddenly got twice as good. The average is the fairer reading.`
+          : "He looked for a business that could keep earning a high return on the equity left inside it."),
     part("moat", "Gross margin, as a moat trace", 0.16, moat,
       metrics.grossMargin == null ? "—" : `${plainPct(metrics.grossMargin, 0)} gross margin`,
       "A durable advantage usually shows up as a margin the customer cannot bargain away. This is a trace, not proof of a franchise."),

@@ -290,11 +290,11 @@ export function buildMetrics(input: {
       : null
 
   const roeYears: number[] = []
-  for (const year of series) {
-    if (year.netIncome != null && year.equity != null && year.equity > 0) {
-      roeYears.push(year.netIncome / year.equity)
-    }
-    if (roeYears.length >= 5) break
+  for (const year of series.slice(0, 5)) {
+    if (year.netIncome == null || year.equity == null || year.equity <= 0) continue
+    // A book smaller than that year's earnings has been paid down. The ratio is not a return.
+    if (year.netIncome > year.equity) continue
+    roeYears.push(year.netIncome / year.equity)
   }
   const roeAvg = roeYears.length ? roeYears.reduce((sum, n) => sum + n, 0) / roeYears.length : null
 
@@ -351,6 +351,9 @@ export function buildMetrics(input: {
   }
   if (dilutedIsNewer) {
     warnings.push("Share count is the diluted average. The year-end outstanding count is missing or older.")
+  }
+  if (roe != null && roe > 1) {
+    warnings.push("Earnings are larger than the equity. The book has been paid down, so that return is not used as the multi-year return on the business.")
   }
   if (!aligned && statementCurrency) {
     warnings.push(`The statements are in ${statementCurrency} and the quote is in ${currency}. Price ratios are withheld, because this feed has no exchange rate from the filing.`)
