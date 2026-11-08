@@ -591,6 +591,7 @@ export function readFilingPeople(html: string): PeopleRead {
     }
   }
   readForeignBoard(text, officers, directors)
+  readManagementTable(text, officers, directors)
   officers.sort((a, b) => rankOfficer(a) - rankOfficer(b))
   return {
     officers: officers.slice(0, 12),
@@ -620,6 +621,38 @@ function readForeignBoard(text: string, officers: Officer[], directors: Director
       bio: null,
     })
     if (/Chief|President|Chairman|Chair/.test(role)) upsertOfficer(officers, name, role, age, null)
+  }
+}
+
+/** A 20-F table headed Name, Age, Position/Title. */
+function readManagementTable(text: string, officers: Officer[], directors: Director[]) {
+  const at = text.search(/Name\s+\(\d+\)\s+Age\s+Position\/Title/i)
+  if (at < 0) return
+  const window = text
+    .slice(at, at + 2400)
+    .replace(/\s+/g, " ")
+    .replace(/^.*?Position\/Title\s+/i, "")
+    .split(/Director nominated|Biographical Information|\(a\)\s+Group/i)[0]
+  const word = "(?!(?:Chief|Director|President|Chairman|Independent|General|Counsel|Officer|People|Financial)\\b)[A-Z](?:[a-zA-Z.'’\\-]+|\\.)"
+  const name = `${word}(?:\\s+${word}){0,4}\\s+[A-Z]{2,}`
+  const row = new RegExp(
+    `(${name})\\s+[†*]?\\s*(?:\\([a-z0-9]+\\)\\s*)*(\\d{2})\\s+((?:Chairman|Director|Independent director|Chief|President|General Counsel)(?:(?!\\s+${name}).){0,90})`,
+    "g",
+  )
+  for (const match of window.matchAll(row)) {
+    const person = match[1].replace(/\s+/g, " ").trim()
+    const age = Number(match[2])
+    const role = match[3].replace(/\s+/g, " ").replace(/[†*].*$/, "").trim().replace(/[,;]$/, "")
+    if (NOT_A_NAME.test(person) || age < 25 || age > 90 || directors.some((director) => director.name === person)) continue
+    if (/director|chairman|\bchair\b/i.test(role)) {
+      directors.push({
+        name: person,
+        since: "",
+        note: /independent/i.test(role) ? "Independent director" : role,
+        bio: null,
+      })
+    }
+    if (/Chief|President|Chairman|Chair|General Counsel/.test(role)) upsertOfficer(officers, person, role, age, null)
   }
 }
 
