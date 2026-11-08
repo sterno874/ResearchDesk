@@ -276,7 +276,7 @@ function largestCut(products: SegmentLine[], target: number): Set<SegmentLine> |
 }
 
 function isSkipped(member: Member): boolean {
-  return /Intersegment|Elimination|Corporate|Reconciling|SingleReportable|Aggregation|(^|[a-z])Total[A-Z]|TotalSegment|^(Reportable|Primary)SegmentMember$/.test(localName(member.name))
+  return /Intersegment|Elimination|Corporate|Reconciling|SingleReportable|Aggregation|(^|[a-z])Total[A-Z]|TotalSegment|^ReportableSegmentMember$/.test(localName(member.name))
 }
 
 function isProduct(member: Member): boolean {
