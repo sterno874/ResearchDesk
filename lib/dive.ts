@@ -368,11 +368,17 @@ function segmentUnit(report: Report, annual: AnnualRead | null, rows: Totals[]):
   const current = latest == null ? [] : rows.filter((row) => row.year === latest).sort((a, b) => (b.revenue ?? 0) - (a.revenue ?? 0))
   const [lead, second] = current
   const total = report.metrics.revenue
+  const segmentTotal = current.reduce((sum, row) => sum + (row.revenue ?? 0), 0)
+  const between = total != null && total > 0 && sameMoney(lead?.currency, report) && segmentTotal > total * 1.05
   const branded = current.some((row) => /brand/i.test(row.segment))
   let text = branded
     ? "The filing splits the business by brand rather than by a counted unit."
     : "The filing splits sales by the segments it reports."
-  if (lead?.revenue != null && total && sameMoney(lead.currency, report)) {
+  if (lead?.revenue != null && between) {
+    text = `${lead.segment} reports ${cash(lead.revenue, lead.currency)}.`
+    if (second?.revenue != null) text += ` ${second.segment} reports ${cash(second.revenue, second.currency)}.`
+    text += " Those figures include sales between segments, so they are not a share of consolidated sales."
+  } else if (lead?.revenue != null && total && sameMoney(lead.currency, report)) {
     text = `${lead.segment} is ${plainPct(lead.revenue / total, 0)} of sales, ${cash(lead.revenue, lead.currency)}.`
     if (second?.revenue != null) text += ` ${second.segment} is ${plainPct(second.revenue / total, 0)}, ${cash(second.revenue, second.currency)}.`
   } else if (lead?.revenue != null) {
