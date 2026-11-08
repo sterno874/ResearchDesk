@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react"
 import { Pips } from "@/components/Pips"
-import { plainPct, price } from "@/lib/format"
+import { gap, price } from "@/lib/format"
 import type { BlotterRead } from "@/lib/rank"
 import { apiUrl } from "@/lib/remote"
 import type { CollectSummary, Idea, SourceKind } from "@/lib/types"
@@ -28,10 +28,17 @@ function hasDeepGap(read: BlotterRead | undefined): read is BlotterRead & { deep
   return read?.deepGap != null && Number.isFinite(read.deepGap)
 }
 
-function deepLabel(gap: number): string {
-  if (Math.abs(gap) < 0.005) return "At deep value"
-  const body = plainPct(Math.abs(gap), 0)
-  return gap > 0 ? `${body} above deep value` : `${body} under deep value`
+/** How far the deep-value price sits from the quote. Negative means it is below today's price. */
+function fromHere(read: BlotterRead | undefined): number | null {
+  if (read?.price == null || read.deep == null || !(read.price > 0) || !Number.isFinite(read.deep)) return null
+  return read.deep / read.price - 1
+}
+
+function deepLabel(read: BlotterRead): string {
+  const move = fromHere(read)
+  if (move == null) return ""
+  if (Math.abs(move) < 0.005) return "At the quote"
+  return `${gap(read.deep ?? null, read.price ?? null)} from here`
 }
 
 function deepTitle(read: BlotterRead): string {
@@ -128,6 +135,14 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
       return idea.sources.some((source) => source.kind === filter)
     })
     .sort((a, b) => {
+      if (filter === "deep" && sort === "rank") {
+        const left = fromHere(reads[a.ticker])
+        const right = fromHere(reads[b.ticker])
+        const leftDistance = left == null ? Number.POSITIVE_INFINITY : Math.abs(left)
+        const rightDistance = right == null ? Number.POSITIVE_INFINITY : Math.abs(right)
+        if (leftDistance !== rightDistance) return leftDistance - rightDistance
+        return a.ticker.localeCompare(b.ticker)
+      }
       if (sort === "name") return a.name.localeCompare(b.name) || a.ticker.localeCompare(b.ticker)
       if (sort === "latest") return b.updatedAt.localeCompare(a.updatedAt) || a.ticker.localeCompare(b.ticker)
       const left = reads[a.ticker]?.stars
@@ -287,7 +302,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
         {ranking
           ? `Reading filings for a rank. ${rankedCount} of ${ideas.length} ${ideas.length === 1 ? "name has" : "names have"} one.`
           : rankedCount
-            ? `${rankedCount} of ${ideas.length} ranked from the latest report.`
+            ? `${rankedCount} of ${ideas.length} ranked from the latest report.${filter === "deep" && sort === "rank" ? " This list is how far the quote would have to move to reach the deep-value price, closest first. The stars are unchanged." : ""}`
             : null}
       </p>
 
@@ -323,7 +338,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
                     {read ? read.horizonLabel : ranking ? "Reading" : "No read"}
                     {read?.depth && read.depth > 1 ? <span className="dive-mark">Dive {read.depth}</span> : null}
                   </div>
-                  {hasDeepGap(read) ? <div className="deep-gap" title={deepTitle(read)}>{deepLabel(read.deepGap)}</div> : null}
+                  {hasDeepGap(read) ? <div className="deep-gap" title={deepTitle(read)}>{deepLabel(read)}</div> : null}
                   <div className="kicker">{when(lead?.at || idea.updatedAt)}</div>
                 </a>
                 <a href={`/report/${idea.ticker}`}>
