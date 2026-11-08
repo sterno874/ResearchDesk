@@ -110,6 +110,9 @@ export function shorthand(report: Report, now = new Date()): Omit<BlotterRead, "
   } else if (report.traps.some((trap) => trap.id === "fresh-listing")) {
     horizon = "none"
     clock = "The quote is a new listing, and it has already fallen. Closing the gap to last year's cash flow on a one- or two-year clock is a guess."
+  } else if (report.metrics.statementCurrency && report.metrics.statementCurrency !== report.metrics.currency) {
+    horizon = "none"
+    clock = `The statements are in ${report.metrics.statementCurrency} and the quote is in ${report.metrics.currency}. A clock on a price gap is not set from mixed units.`
   } else if (report.memo.kind === "turnaround") {
     horizon = "years"
     clock = "Margins are below this company's own history. The memo looks for proof across the next several filings, and the price case sits about two years out."

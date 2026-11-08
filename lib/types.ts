@@ -52,6 +52,8 @@ export type Metrics = {
   previousClose: number | null
   changePercent: number | null
   currency: string
+  /** Currency of the annual figures. Differs from `currency` when the quote cannot be mixed in. */
+  statementCurrency: string | null
   asOf: string | null
   fiscalYear: number | null
   fiscalEnd: string | null

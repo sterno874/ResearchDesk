@@ -1,6 +1,7 @@
 import { money, plainPct, ratio } from "./format"
 import { getJson } from "./http"
 import { readEntry, writeEntry } from "./persist"
+import { annualSeries, type CompanyFacts } from "./sec"
 import type { Metrics, SectorBrief, SectorCheck, SectorId, SectorStudy } from "./types"
 
 const DAY = 86400000
@@ -42,6 +43,16 @@ export function skipsMultiple(id: SectorId): boolean {
   return id === "bank" || id === "insurer" || id === "reit"
 }
 
+/** Interest paid to depositors. A filing that has it is a deposit-taker even when the SIC code is not a bank. */
+export function takesDeposits(facts: CompanyFacts): boolean {
+  const interest = annualSeries(facts, ["InterestExpenseOnDepositsFromCustomers"], "flow")
+  return (interest[0]?.val ?? 0) > 0
+}
+
+function stated(metrics: Metrics, n: number | null): string {
+  return money(n, metrics.statementCurrency ?? metrics.currency)
+}
+
 function check(label: string, value: string, note: string): SectorCheck {
   return { label, value, note }
 }
@@ -55,7 +66,7 @@ function runway(metrics: Metrics): SectorCheck {
     years == null ? "—" : `${years.toFixed(1)} years`,
     years == null
       ? "Runway is cash divided by free cash flow when free cash flow is negative. One of those figures is missing, so the years are not stated."
-      : `Cash is ${money(cash)} and free cash flow is ${money(metrics.fcf)}. At that burn the cash covers about ${years.toFixed(1)} years. A financing before then changes the share count.`,
+      : `Cash is ${stated(metrics, cash)} and free cash flow is ${stated(metrics, metrics.fcf)}. At that burn the cash covers about ${years.toFixed(1)} years. A financing before then changes the share count.`,
   )
 }
 
@@ -68,9 +79,9 @@ function checksFor(id: SectorId, metrics: Metrics): SectorCheck[] {
   if (id === "biotech" || (id === "pharma" && developing(id, metrics))) {
     return [
       runway(metrics),
-      check("Revenue", money(metrics.revenue), "Product revenue is what turns a study into a business. A small number here means the statements are still the cash and the trials."),
+      check("Revenue", stated(metrics, metrics.revenue), "Product revenue is what turns a study into a business. A small number here means the statements are still the cash and the trials."),
       check("Years in the black", years, "A development company can be public for years before a profit. The multiple waits for that record."),
-      check("Cash", money(metrics.cash), "The cash is the time the company can keep the studies running without issuing shares."),
+      check("Cash", stated(metrics, metrics.cash), "The cash is the time the company can keep the studies running without issuing shares."),
     ]
   }
   if (id === "pharma") {
@@ -78,31 +89,31 @@ function checksFor(id: SectorId, metrics: Metrics): SectorCheck[] {
       check("Return on capital", plainPct(metrics.roic, 0), "A drug company that already sells product is judged on the cash the current book earns."),
       check("Gross margin", margin, "The margin is the patented product. It falls when the patent clock runs out and a generic arrives."),
       check("Years in the black", years, "Several profitable years is the difference between a franchise and a single launch."),
-      check("Free cash flow", money(metrics.fcf), "The studies further down are what has to replace this cash flow."),
+      check("Free cash flow", stated(metrics, metrics.fcf), "The studies further down are what has to replace this cash flow."),
     ]
   }
   if (id === "bank") {
     return [
       check("Price / book", metrics.pb == null ? "—" : `${ratio(metrics.pb, 2)}×`, "A bank is priced against book. The book is loans and securities, not a pile of cash you can pick up."),
       check("Return on equity", plainPct(metrics.roe, 0), metrics.roeAvg != null ? `The recent average is ${plainPct(metrics.roeAvg, 0)}. One year of a high return is often a credit year, not a new franchise.` : "Equity earnings over equity. The credit cycle moves this more than a product does."),
-      check("Equity", money(metrics.equity), "This is the capital the regulators and the buyers both start from."),
-      check("Borrowings", money(metrics.debt), "These are the borrowings in the filing feed. A bank's deposits are its funding, and they are not the same thing as a corporate bond."),
+      check("Equity", stated(metrics, metrics.equity), "This is the capital the regulators and the buyers both start from."),
+      check("Borrowings", stated(metrics, metrics.debt), "These are the borrowings in the filing feed. A bank's deposits are its funding, and they are not the same thing as a corporate bond."),
     ]
   }
   if (id === "insurer") {
     return [
       check("Price / book", metrics.pb == null ? "—" : `${ratio(metrics.pb, 2)}×`, "An insurer is priced against book. The book includes the investment portfolio and the reserves."),
       check("Return on equity", plainPct(metrics.roe, 0), "Underwriting profit and investment income land together in this return. The feed does not split them."),
-      check("Revenue", money(metrics.revenue), "For an insurer this line is often premiums and investment income in one number."),
-      check("Equity", money(metrics.equity), "A cheap price on a book that is shrinking is not the same bet as a cheap price on a book that is earning."),
+      check("Revenue", stated(metrics, metrics.revenue), "For an insurer this line is often premiums and investment income in one number."),
+      check("Equity", stated(metrics, metrics.equity), "A cheap price on a book that is shrinking is not the same bet as a cheap price on a book that is earning."),
     ]
   }
   if (id === "reit") {
     return [
-      check("Revenue", money(metrics.revenue), "Rent is the business. One tenant doing a large share of it is the risk, and the customer table is where that shows up."),
+      check("Revenue", stated(metrics, metrics.revenue), "Rent is the business. One tenant doing a large share of it is the risk, and the customer table is where that shows up."),
       check("Dividend yield", plainPct(metrics.dividendYield, 1), "A REIT's return to the holder is mostly the distribution, not a multiple on free cash flow."),
       check("Debt / equity", ratio(metrics.debtToEquity), "The buildings are financed. The question is whether the rent covers the debt when a tenant leaves."),
-      check("Free cash flow", money(metrics.fcf), "Free cash flow subtracts depreciation. A building is depreciated on purpose. Funds from operations are not a tag this feed reads, so no price is set from free cash flow."),
+      check("Free cash flow", stated(metrics, metrics.fcf), "Free cash flow subtracts depreciation. A building is depreciated on purpose. Funds from operations are not a tag this feed reads, so no price is set from free cash flow."),
     ]
   }
   if (id === "utility") {
@@ -117,7 +128,7 @@ function checksFor(id: SectorId, metrics: Metrics): SectorCheck[] {
     return [
       check("Operating margin", op, metrics.normalOperatingMargin != null ? `The company's own older margin is ${plainPct(metrics.normalOperatingMargin, 1)}. The difference is mostly the commodity, not a new skill.` : "The margin moves with the barrel. One fat year is not the earning power."),
       check("Revenue versus the peak", metrics.peakRevenue && metrics.revenue ? plainPct(metrics.revenue / metrics.peakRevenue - 1, 0) : "—", "Producers do not set the price. A revenue line well under the peak is a price year."),
-      check("Free cash flow", money(metrics.fcf), "Cash after the wells is the number that can pay the holder. It disappears when the price does."),
+      check("Free cash flow", stated(metrics, metrics.fcf), "Cash after the wells is the number that can pay the holder. It disappears when the price does."),
       check("Debt / equity", ratio(metrics.debtToEquity), "The balance sheet is what survives the year the commodity is down."),
     ]
   }
@@ -133,7 +144,7 @@ function checksFor(id: SectorId, metrics: Metrics): SectorCheck[] {
     const gross = metrics.grossMargin
     return [
       check("Gross margin", margin, gross != null && gross < 0.5 ? "Under 50% is a services shop or a hardware mix. It is not a software product that sells again at no extra cost." : "A software product leaves a high gross margin. That is the first split from a contract shop."),
-      check("Free cash flow", money(metrics.fcf), metrics.revenue ? `That is ${plainPct(metrics.fcf != null ? metrics.fcf / metrics.revenue : null, 0)} of revenue. Revenue that does not become cash is still a services bill.` : "Cash after the spending is the test that the revenue is real."),
+      check("Free cash flow", stated(metrics, metrics.fcf), metrics.revenue ? `That is ${plainPct(metrics.fcf != null ? metrics.fcf / metrics.revenue : null, 0)} of revenue. Revenue that does not become cash is still a services bill.` : "Cash after the spending is the test that the revenue is real."),
       check("Revenue growth", plainPct(metrics.revenueCagr, 1), "Growth is part of the price in software. The cap in the memo still applies."),
       check("Years in the black", years, "A long loss record with a high gross margin is a company still buying the growth."),
     ]
@@ -144,7 +155,7 @@ function checksFor(id: SectorId, metrics: Metrics): SectorCheck[] {
       check("Gross margin", margin, "The margin says where the company sits. A designer and a factory do not earn the same gross margin."),
       check("Capital spending / cash from operations", spend == null ? "—" : plainPct(spend, 0), "A factory bill can take the cash the income statement says is there."),
       check("Revenue, three years", plainPct(metrics.revenueChange3y, 0), "Chip revenue is a cycle. The latest year is a point on it."),
-      check("Free cash flow", money(metrics.fcf), "Cash after the factories is what an owner can take. The peak year is the wrong one to annualize."),
+      check("Free cash flow", stated(metrics, metrics.fcf), "Cash after the factories is what an owner can take. The peak year is the wrong one to annualize."),
     ]
   }
   if (id === "retail") {
@@ -152,7 +163,7 @@ function checksFor(id: SectorId, metrics: Metrics): SectorCheck[] {
       check("Gross margin", margin, "Retail is the spread between what the goods cost and what the customer paid."),
       check("Operating margin", op, "After the stores and the staff. A thin operating margin has no room for a bad season."),
       check("Revenue, three years", plainPct(metrics.revenueChange3y, 0), "Sales still arriving is the whole question. A concept that has stopped growing same-store is a different investment."),
-      check("Free cash flow", money(metrics.fcf), "Inventory that piles up does not show in a single margin. Cash after the year does."),
+      check("Free cash flow", stated(metrics, metrics.fcf), "Inventory that piles up does not show in a single margin. Cash after the year does."),
     ]
   }
   if (id === "auto") {
@@ -160,13 +171,13 @@ function checksFor(id: SectorId, metrics: Metrics): SectorCheck[] {
       check("Operating margin", op, metrics.normalOperatingMargin != null ? `The company's own older margin is ${plainPct(metrics.normalOperatingMargin, 1)}. Automakers earn that in a good volume year and miss it in a bad one.` : "One year's margin is a volume year, not the franchise."),
       check("Revenue versus the peak", metrics.peakRevenue && metrics.revenue ? plainPct(metrics.revenue / metrics.peakRevenue - 1, 0) : "—", "Units and price. A year under the peak is the cycle, unless the share of the market went with it."),
       check("Debt / equity", ratio(metrics.debtToEquity), "The down year is survived with the balance sheet. A finance subsidiary's debt can sit inside this number."),
-      check("Free cash flow", money(metrics.fcf), "Cash after the tooling. A profit that the factories spend is not yet the owner's."),
+      check("Free cash flow", stated(metrics, metrics.fcf), "Cash after the tooling. A profit that the factories spend is not yet the owner's."),
     ]
   }
   if (id === "telecom") {
     return [
-      check("Free cash flow", money(metrics.fcf), "A network that is already built should throw off cash after the maintenance spending."),
-      check("Capital spending", money(metrics.capex), "The maintenance bill is the part of the story that keeps coming back."),
+      check("Free cash flow", stated(metrics, metrics.fcf), "A network that is already built should throw off cash after the maintenance spending."),
+      check("Capital spending", stated(metrics, metrics.capex), "The maintenance bill is the part of the story that keeps coming back."),
       check("Debt / equity", ratio(metrics.debtToEquity), "The network was financed. The equity is what remains after that debt."),
       check("Dividend yield", plainPct(metrics.dividendYield, 1), "The holder is paid by the dividend. A cut is the thesis breaking."),
     ]

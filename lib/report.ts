@@ -8,7 +8,7 @@ import { getQuote } from "./market"
 import { buildMetrics } from "./metrics"
 import { buildHeadline, buildMemo, buildPitch } from "./narrative"
 import { loadFacts, loadSubmissions, loadUniverse, normalizeTicker } from "./sec"
-import { describeSector, loadStudies, sectorId } from "./sector"
+import { describeSector, loadStudies, sectorId, takesDeposits } from "./sector"
 import { shorthand, statementGaps } from "./rank"
 import { saveRead } from "./reads"
 import { buildTraps } from "./traps"
@@ -83,7 +83,8 @@ export const getReport = cache(async (raw: string): Promise<ReportResult> => {
   }
   const investors = scoreAll(metrics).sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
   const submissions = submissionsResult.status === "fulfilled" ? submissionsResult.value : null
-  const id = sectorId(submissions?.sic ?? null, submissions?.sicDescription ?? null)
+  const filedAs = sectorId(submissions?.sic ?? null, submissions?.sicDescription ?? null)
+  const id = filedAs === "operating" && takesDeposits(factsResult.value) ? "bank" : filedAs
   const trials = await loadStudies(id, company.name, company.cik)
   const sector = describeSector(id, metrics, trials.studies, trials.note)
   const draft = buildMemo(metrics, id)

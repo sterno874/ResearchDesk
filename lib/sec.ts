@@ -19,11 +19,14 @@ type SecPoint = {
   frame?: string
 }
 
+type FactSet = Record<string, { units?: Record<string, SecPoint[]> }>
+
 type CompanyFacts = {
   entityName?: string
   facts?: {
-    "us-gaap"?: Record<string, { units?: Record<string, SecPoint[]> }>
-    dei?: Record<string, { units?: Record<string, SecPoint[]> }>
+    "us-gaap"?: FactSet
+    "ifrs-full"?: FactSet
+    dei?: FactSet
   }
 }
 
@@ -143,14 +146,84 @@ function isAnnualForm(form?: string): boolean {
   return form.startsWith("10-K") || form.startsWith("20-F") || form.startsWith("40-F")
 }
 
-function rawPoints(facts: CompanyFacts, name: string): SecPoint[] {
-  const node = facts.facts?.["us-gaap"]?.[name] ?? facts.facts?.dei?.[name]
-  const units = node?.units
-  if (!units) return []
+/** IFRS names for a US-GAAP concept. Used only when the US-GAAP tag itself is absent. */
+const IFRS_ALIAS: Record<string, string[]> = {
+  RevenueFromContractWithCustomerExcludingAssessedTax: ["Revenue"],
+  RevenueFromContractWithCustomerIncludingAssessedTax: ["Revenue"],
+  Revenues: ["Revenue"],
+  SalesRevenueNet: ["Revenue"],
+  SalesRevenueGoodsNet: ["Revenue"],
+  RegulatedAndUnregulatedOperatingRevenue: ["Revenue"],
+  NetIncomeLoss: ["ProfitLossAttributableToOwnersOfParent", "ProfitLoss"],
+  OperatingIncomeLoss: ["ProfitLossFromOperatingActivities"],
+  GrossProfit: ["GrossProfit"],
+  StockholdersEquity: ["EquityAttributableToOwnersOfParent", "Equity"],
+  StockholdersEquityAttributableToParent: ["EquityAttributableToOwnersOfParent"],
+  StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest: ["Equity"],
+  Assets: ["Assets"],
+  Liabilities: ["Liabilities"],
+  AssetsCurrent: ["CurrentAssets"],
+  LiabilitiesCurrent: ["CurrentLiabilities"],
+  NetCashProvidedByUsedInOperatingActivities: ["CashFlowsFromUsedInOperatingActivities"],
+  PaymentsToAcquirePropertyPlantAndEquipment: ["PurchaseOfPropertyPlantAndEquipment"],
+  PaymentsToAcquireProductiveAssets: ["PurchaseOfPropertyPlantAndEquipment"],
+  PaymentsToAcquireOtherProductiveAssets: ["PurchaseOfPropertyPlantAndEquipment"],
+  EarningsPerShareDiluted: ["DilutedEarningsLossPerShare"],
+  WeightedAverageNumberOfDilutedSharesOutstanding: ["AdjustedWeightedAverageShares"],
+  WeightedAverageNumberOfSharesOutstandingBasic: ["WeightedAverageShares"],
+  CashAndCashEquivalentsAtCarryingValue: ["CashAndCashEquivalents"],
+  Cash: ["CashAndCashEquivalents"],
+  LongTermDebt: ["Borrowings", "ShorttermBorrowings"],
+  PaymentsOfDividends: ["DividendsPaid"],
+  PaymentsOfDividendsCommonStock: ["DividendsPaid"],
+}
+
+function pickUnit(units: Record<string, SecPoint[]>): { unit: string; points: SecPoint[] } | null {
   for (const key of ["USD", "USD/shares", "shares", "pure"]) {
-    if (units[key]?.length) return units[key]
+    if (units[key]?.length) return { unit: key, points: units[key] }
   }
-  return Object.values(units)[0] ?? []
+  const first = Object.entries(units).find(([, points]) => points.length)
+  return first ? { unit: first[0], points: first[1] } : null
+}
+
+function readExact(facts: CompanyFacts, name: string): { unit: string; points: SecPoint[] } | null {
+  const books = facts.facts
+  if (!books) return null
+  for (const ns of ["us-gaap", "ifrs-full", "dei"] as const) {
+    const picked = pickUnit(books[ns]?.[name]?.units ?? {})
+    if (picked) return picked
+  }
+  return null
+}
+
+function resolveTag(facts: CompanyFacts, name: string): { unit: string; points: SecPoint[] } | null {
+  const direct = readExact(facts, name)
+  if (direct) return direct
+  for (const alias of IFRS_ALIAS[name] ?? []) {
+    const picked = pickUnit(facts.facts?.["ifrs-full"]?.[alias]?.units ?? {})
+    if (picked) return picked
+  }
+  return null
+}
+
+function rawPoints(facts: CompanyFacts, name: string): SecPoint[] {
+  return resolveTag(facts, name)?.points ?? []
+}
+
+/** Currency of the revenue series actually used. Null when the tag is missing or is not a currency. */
+export function reportingCurrency(facts: CompanyFacts, names: string[]): string | null {
+  let bestEnd = ""
+  let unit: string | null = null
+  for (const name of names) {
+    const found = resolveTag(facts, name)
+    if (!found || !/^[A-Z]{3}$/.test(found.unit)) continue
+    const end = flowAnnual(found.points)[0]?.end ?? ""
+    if (end > bestEnd) {
+      bestEnd = end
+      unit = found.unit
+    }
+  }
+  return unit
 }
 
 export type AnnualPoint = {

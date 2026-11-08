@@ -248,13 +248,13 @@ function unclear(metrics: Metrics): Memo {
   }
 }
 
-function withheld(label: string, summary: string, detail: string): Memo {
+function withheld(label: string, summary: string, detail: string, method?: string): Memo {
   const target: Target = {
     bear: null,
     base: null,
     bull: null,
     fairNow: null,
-    method: "No free-cash-flow multiple is set. That multiple prices an operating company, and this filing is a different business.",
+    method: method ?? "No free-cash-flow multiple is set. That multiple prices an operating company, and this filing is a different business.",
     assumptions: [
       "The bear, base, and bull prices are withheld on purpose.",
       "Figures are the latest annual XBRL facts, set next to today's price. A quarter that just happened may not be in the annual line yet.",
@@ -270,6 +270,14 @@ function withheld(label: string, summary: string, detail: string): Memo {
 }
 
 export function buildMemo(metrics: Metrics, sector: SectorId): Memo {
+  if (metrics.statementCurrency && metrics.statementCurrency !== metrics.currency) {
+    return withheld(
+      "Different currencies",
+      `The annual figures are in ${metrics.statementCurrency}. The quote is in ${metrics.currency}. Revenue was ${money(metrics.revenue, metrics.statementCurrency)}.`,
+      "A per-share price divides a statement total by the share count and sets it next to the quote. Those two numbers are not the same currency, and the filing feed did not give the exchange rate. The price is withheld.",
+      "No per-share price is set. The statements and the quote are in different currencies.",
+    )
+  }
   if (skipsMultiple(sector)) {
     if (sector === "bank") {
       return withheld(
@@ -309,11 +317,13 @@ export function buildMemo(metrics: Metrics, sector: SectorId): Memo {
 
 export function buildPitch(metrics: Metrics, memo: Memo, traps: Trap[], sector: SectorId): string {
   const warning = traps.find((trap) => trap.memoLine && (trap.severity === "wall" || trap.severity === "serious"))?.memoLine ?? ""
+  const books = metrics.statementCurrency ?? metrics.currency
+  const worth = metrics.marketCap != null ? ` The equity is worth ${money(metrics.marketCap, metrics.currency)}.` : ""
   const scale = skipsMultiple(sector)
-    ? `Equity is ${money(metrics.equity)}.${metrics.marketCap != null ? ` The equity is worth ${money(metrics.marketCap)}.` : ""}`
+    ? `Equity is ${money(metrics.equity, books)}.${worth}`
     : developing(sector, metrics)
-      ? `Revenue was ${money(metrics.revenue)}. Cash is ${money(metrics.cash)}.${metrics.marketCap != null ? ` The equity is worth ${money(metrics.marketCap)}.` : ""}`
-      : `Revenue was ${money(metrics.revenue)}. Free cash flow was ${money(metrics.fcf)}.${metrics.marketCap != null ? ` The equity is worth ${money(metrics.marketCap)}.` : ""}`
+      ? `Revenue was ${money(metrics.revenue, books)}. Cash is ${money(metrics.cash, books)}.${worth}`
+      : `Revenue was ${money(metrics.revenue, books)}. Free cash flow was ${money(metrics.fcf, books)}.${worth}`
   const wall = traps.some((trap) => trap.id === "maturity-wall")
   let play: string
   if (wall) {
@@ -338,7 +348,11 @@ export function buildPitch(metrics: Metrics, memo: Memo, traps: Trap[], sector: 
         ? ` A no-growth value on today's free cash flow is ${price(fair, metrics.currency)} a share.`
         : ""
     play = `The play is a business that already works. Return on capital is about ${plainPct(metrics.roic, 0)}. Nothing in the filings has to be rescued.${priced}`
-  } else if (skipsMultiple(sector) || developing(sector, metrics)) {
+  } else if (
+    (metrics.statementCurrency != null && metrics.statementCurrency !== metrics.currency)
+    || skipsMultiple(sector)
+    || developing(sector, metrics)
+  ) {
     play = memo.summary
   } else {
     play = "The play is not a clean one. The filings do not show a margin waiting to revert, and they do not show a high-return business throwing off cash."

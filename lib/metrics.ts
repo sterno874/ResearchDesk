@@ -1,4 +1,4 @@
-import { annualSeries, readFilings, type Company, type CompanyFacts, type Submissions } from "./sec"
+import { annualSeries, readFilings, reportingCurrency, type Company, type CompanyFacts, type Submissions } from "./sec"
 import { cv, median } from "./stats"
 import type { Metrics, Quote, YearPoint } from "./types"
 import type { AnnualPoint } from "./sec"
@@ -25,11 +25,17 @@ function yearsBetween(later: string, earlier: string): number | null {
 function shareChange(points: AnnualPoint[]): number | null {
   if (points.length < 2) return null
   const now = points[0]
+  if (!now.val) return null
   const target = new Date(now.end)
   target.setFullYear(target.getFullYear() - 5)
   const targetIso = target.toISOString().slice(0, 10)
-  const then = points.find((point) => point.end <= targetIso)
-  if (!then || then.val === 0) return null
+  const then = points.find((point) => {
+    if (point.end > targetIso || point.val === 0) return false
+    const ratio = now.val / point.val
+    // A 25-fold jump is a different unit or a stub class, not a split this desk can see.
+    return ratio < 25 && ratio > 1 / 25
+  })
+  if (!then) return null
   return now.val / then.val - 1
 }
 
@@ -160,14 +166,16 @@ export function buildMetrics(input: {
   const { company, facts, submissions, quote } = input
   const warnings: string[] = []
 
-  const revenuePts = annualSeries(facts, [
+  const revenueTags = [
     "RevenueFromContractWithCustomerExcludingAssessedTax",
     "RevenueFromContractWithCustomerIncludingAssessedTax",
     "Revenues",
     "SalesRevenueNet",
     "SalesRevenueGoodsNet",
     "RegulatedAndUnregulatedOperatingRevenue",
-  ], "flow")
+  ]
+  const revenuePts = annualSeries(facts, revenueTags, "flow")
+  const statementCurrency = reportingCurrency(facts, revenueTags)
   const incomePts = annualSeries(facts, ["NetIncomeLoss"], "flow")
   const operatingPts = annualSeries(facts, ["OperatingIncomeLoss"], "flow")
   const grossPts = annualSeries(facts, ["GrossProfit"], "flow")
@@ -247,6 +255,7 @@ export function buildMetrics(input: {
 
   const price = quote?.price ?? null
   const currency = quote?.currency ?? "USD"
+  const aligned = statementCurrency == null || statementCurrency === currency
   const marketCap = price != null && shares ? price * shares : null
   const fcf = cfo == null || capex == null ? null : cfo - capex
   const ownerEarnings = fcf ?? (capexStale ? null : netIncome)
@@ -343,6 +352,9 @@ export function buildMetrics(input: {
   if (dilutedIsNewer) {
     warnings.push("Share count is the diluted average. The year-end outstanding count is missing or older.")
   }
+  if (!aligned && statementCurrency) {
+    warnings.push(`The statements are in ${statementCurrency} and the quote is in ${currency}. Price ratios are withheld, because this feed has no exchange rate from the filing.`)
+  }
 
   const filingRead = readFilings(submissions, company.cik)
   if (!submissions) warnings.push("Recent filing list didn't load. Catalyst checks are blank.")
@@ -356,12 +368,13 @@ export function buildMetrics(input: {
     previousClose: quote?.previousClose ?? null,
     changePercent: quote?.changePercent ?? null,
     currency,
+    statementCurrency,
     asOf: quote?.asOf ?? null,
     fiscalYear,
     fiscalEnd,
     shares,
     marketCap,
-    enterpriseValue,
+    enterpriseValue: aligned ? enterpriseValue : null,
     revenue,
     netIncome,
     eps,
@@ -377,10 +390,10 @@ export function buildMetrics(input: {
     capex: capex == null ? null : Math.abs(capex),
     fcf,
     ownerEarnings,
-    pe,
-    pb,
-    fcfYield,
-    earningsYield,
+    pe: aligned ? pe : null,
+    pb: aligned ? pb : null,
+    fcfYield: aligned ? fcfYield : null,
+    earningsYield: aligned ? earningsYield : null,
     roe,
     roeAvg,
     roic,
@@ -388,10 +401,10 @@ export function buildMetrics(input: {
     operatingMargin,
     currentRatio,
     debtToEquity,
-    dividendYield,
-    bookPerShare,
-    ncavPerShare,
-    grahamNumber,
+    dividendYield: aligned ? dividendYield : null,
+    bookPerShare: aligned ? bookPerShare : null,
+    ncavPerShare: aligned ? ncavPerShare : null,
+    grahamNumber: aligned ? grahamNumber : null,
     workingCapital,
     positiveEarningsYears,
     earningsYears,

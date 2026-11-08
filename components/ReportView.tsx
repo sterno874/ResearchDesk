@@ -337,10 +337,10 @@ export function ReportView({ report }: { report: Report }) {
             {metrics.series.map((year) => (
               <tr key={year.end}>
                 <td>{when(year.end)}{year.fy ? ` · FY${year.fy}` : ""}</td>
-                <td>{money(year.revenue, metrics.currency)}</td>
+                <td>{money(year.revenue, metrics.statementCurrency ?? metrics.currency)}</td>
                 <td>{plainPct(year.operatingMargin, 1)}</td>
-                <td>{money(year.netIncome, metrics.currency)}</td>
-                <td>{money(year.equity, metrics.currency)}</td>
+                <td>{money(year.netIncome, metrics.statementCurrency ?? metrics.currency)}</td>
+                <td>{money(year.equity, metrics.statementCurrency ?? metrics.currency)}</td>
               </tr>
             ))}
           </tbody>
