@@ -171,6 +171,48 @@ export type Quote = {
   history: { date: string; close: number }[]
 }
 
+export type SectorId =
+  | "biotech"
+  | "pharma"
+  | "bank"
+  | "insurer"
+  | "reit"
+  | "utility"
+  | "energy"
+  | "staple"
+  | "retail"
+  | "software"
+  | "chip"
+  | "auto"
+  | "telecom"
+  | "operating"
+
+export type SectorCheck = {
+  label: string
+  value: string
+  note: string
+}
+
+export type SectorStudy = {
+  id: string
+  title: string
+  phase: string
+  status: string
+  when: string
+  url: string
+}
+
+export type SectorBrief = {
+  id: SectorId
+  label: string
+  /** How a specialist reads this kind of business, in one paragraph. */
+  read: string
+  checks: SectorCheck[]
+  studies: SectorStudy[]
+  /** Why the study list is empty, when this sector looks them up. */
+  studiesNote: string | null
+}
+
 export type Report = {
   metrics: Metrics
   investors: InvestorScore[]
@@ -184,6 +226,7 @@ export type Report = {
   traps: Trap[]
   /** Pieces of the profile the filings did not fill. They cap the stars. */
   gaps: string[]
+  sector: SectorBrief
 }
 
 export type ReportResult =

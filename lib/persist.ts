@@ -11,7 +11,8 @@ let ready: Promise<void> | null = null
 
 function mode(): "db" | "disk" {
   if (process.env.DATABASE_URL) return "db"
-  // A real disk, such as the Oracle VM, keeps the blotter. Fly's disk does not.
+  // Local development, and the production build, keep files on disk.
+  // The Oracle machine sets DATABASE_URL. Its deploy directory is replaced on every push.
   if (process.env.DESK_STORE === "disk") return "disk"
   if (process.env.NEXT_PHASE === "phase-production-build") return "disk"
   if (process.env.NODE_ENV === "production") {

@@ -1,4 +1,5 @@
 import type { Report, Trap } from "./types"
+import { developing, skipsMultiple } from "./sector"
 
 export type HorizonId = "quarters" | "years" | "decade" | "none"
 
@@ -106,6 +107,9 @@ export function shorthand(report: Report, now = new Date()): Omit<BlotterRead, "
       horizon = "decade"
       clock = `The large principal in the filing is years out${year ? ` (${year})` : ""}. The statements do not make that a one- or two-year equity outcome.`
     }
+  } else if (report.traps.some((trap) => trap.id === "fresh-listing")) {
+    horizon = "none"
+    clock = "The quote is a new listing, and it has already fallen. Closing the gap to last year's cash flow on a one- or two-year clock is a guess."
   } else if (report.memo.kind === "turnaround") {
     horizon = "years"
     clock = "Margins are below this company's own history. The memo looks for proof across the next several filings, and the price case sits about two years out."
@@ -120,6 +124,11 @@ export function shorthand(report: Report, now = new Date()): Omit<BlotterRead, "
       horizon = "decade"
       clock = "The filings describe a business that already earns its capital. Nothing in them closes in a quarter or two. Owning it is a 5–10 year hold, and time has to earn the price."
     }
+  } else if (skipsMultiple(report.sector.id) || developing(report.sector.id, report.metrics)) {
+    horizon = "none"
+    clock = skipsMultiple(report.sector.id)
+      ? "Book and the return on it are the read. A one- or two-year close of a free-cash-flow gap is the wrong clock for this sector."
+      : "The clock is the studies and the cash. A multiple catching up to earnings that are not in the statements yet is a guess."
   }
 
   const reader = closest && mid != null

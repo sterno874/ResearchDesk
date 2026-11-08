@@ -7,9 +7,10 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/var/lib/research-desk
 Environment=NODE_ENV=production
-Environment=DESK_STORE=disk
 Environment=PORT=3217
 Environment=HOSTNAME=127.0.0.1
+# DATABASE_URL lives in this file on the machine. It is not in git.
+EnvironmentFile=/etc/research-desk.env
 ExecStart=/usr/local/bin/node /opt/research-desk/current/server.js
 Restart=on-failure
 RestartSec=3

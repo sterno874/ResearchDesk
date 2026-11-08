@@ -1,5 +1,6 @@
-import { money, multiple, plainPct } from "./format"
-import { annualSeries, type CompanyFacts } from "./sec"
+import { customersOwnShares, firstListing, halvedQuote, readCustomers, readOffering } from "./costume"
+import { money, multiple, plainPct, price, when } from "./format"
+import { annualSeries, type CompanyFacts, type Submissions } from "./sec"
 import type { Memo, Metrics, Trap } from "./types"
 
 const YEAR_MS = 86400000 * 365.25
@@ -49,14 +50,25 @@ function radioBusiness(sic: string | null, sicDescription: string | null, name: 
   return null
 }
 
+function shareCount(n: number): string {
+  if (n >= 1e6) {
+    const millions = n / 1e6
+    return `${millions >= 10 ? millions.toFixed(1) : millions.toFixed(2)} million`
+  }
+  return Math.round(n).toLocaleString("en-US")
+}
+
 export function buildTraps(input: {
   facts: CompanyFacts
   metrics: Metrics
   memo: Memo
   sic: string | null
   sicDescription: string | null
+  submissions: Submissions | null
+  history: { date: string; close: number }[]
+  annualText: string
 }): Trap[] {
-  const { facts, metrics, memo, sic, sicDescription } = input
+  const { facts, metrics, memo, sic, sicDescription, submissions, history, annualText } = input
   const end = metrics.fiscalEnd
   const depreciation = fresh(facts, ["DepreciationDepletionAndAmortization", "DepreciationAndAmortization"], "flow", end)
   const impairment = fresh(facts, ["AssetImpairmentCharges", "GoodwillAndIntangibleAssetImpairment"], "flow", end)
@@ -75,6 +87,85 @@ export function buildTraps(input: {
   const intangibles = (goodwill ?? 0) + (finite ?? 0) + (indefinite ?? 0)
   const buckets = maturities(facts, end)
   const traps: Trap[] = []
+
+  const listing = firstListing(submissions)
+  const offering = listing && annualText ? readOffering(annualText) : null
+  const cut = listing ? halvedQuote(listing, metrics.price, history, offering?.price ?? null) : null
+  if (listing && cut && metrics.price != null) {
+    const from = cut.kind === "offering"
+      ? `The annual report states an offering price of ${price(cut.from)} per ${offering?.unit ?? "share"}.`
+      : `The high since the listing, in the price history, is ${price(cut.from)}.`
+    const soldAfter = listing.prospectusFiled && end && listing.prospectusFiled > end
+      ? ` The prospectus is dated ${when(listing.prospectusFiled)}, after the ${when(end)} statements, so the year being valued closed before the listing.`
+      : end
+        ? ` The year being valued ended ${when(end)}.`
+        : ""
+    traps.push({
+      id: "fresh-listing",
+      severity: "serious",
+      title: "The quote is a new listing",
+      looksLike: `A free-cash-flow yield of ${plainPct(metrics.fcfYield, 1)} and a value a few times the price, as if a long market had marked a known business down.`,
+      actually: `The first registration on file is an ${listing.form} filed ${when(listing.filed)}. ${from} The quote is ${price(metrics.price)}.${soldAfter} Free cash flow of ${money(metrics.fcf)} is that year's figure. The no-growth value of ${price(memo.target.fairNow)} a share multiplies it by the quality multiple. A print this new, already cut from ${price(cut.from)} to ${price(metrics.price)}, is not a long market for the whole company.`,
+      figures: [
+        { label: cut.kind === "offering" ? "Offering price" : "High since listing", value: price(cut.from) },
+        { label: "Price", value: price(metrics.price) },
+        { label: "Free cash flow", value: money(metrics.fcf) },
+        { label: "No-growth value", value: price(memo.target.fairNow) },
+      ],
+      memoLine: `The quote is a new listing that has already fallen from ${price(cut.from)} to ${price(metrics.price)}.`,
+    })
+  }
+
+  const outstanding = metrics.shares
+  if (listing && offering?.ordinary != null && outstanding != null && outstanding > 0) {
+    const fraction = offering.ordinary / outstanding
+    if (fraction < 0.15) {
+      const sold = offering.sold + offering.extra
+      const perAds = offering.ordinary / sold
+      const ratio = offering.unit !== "ADS"
+        ? ""
+        : perAds === 1
+          ? " Each ADS is one ordinary share."
+          : ` Each ADS is ${Number.isInteger(perAds) ? String(perAds) : perAds.toFixed(2)} ordinary shares, so the quote and the ordinary-share count are different units.`
+      const later = listing.prospectusFiled && end && listing.prospectusFiled > end
+        ? ` The sale closed ${when(listing.prospectusFiled)}, after the ${when(end)} share count, so those shares are not in the ${shareCount(outstanding)}.`
+        : ""
+      traps.push({
+        id: "thin-float",
+        severity: cut ? "serious" : "watch",
+        title: "The price covers a thin slice of the shares",
+        looksLike: `An equity value of ${money(metrics.marketCap)}, as if ${price(metrics.price)} were a bid for every share.`,
+        actually: `The annual report says the company sold ${shareCount(sold)} ${offering.unit === "ADS" ? "ADSs" : "shares"}.${ratio} That is ${plainPct(fraction, 1)} of the ${shareCount(outstanding)} shares outstanding on the balance sheet.${later} The quote is the price of the shares that were sold. The equity value multiplies that price by every share.`,
+        figures: [
+          { label: "Shares sold", value: shareCount(offering.ordinary) },
+          { label: "Shares outstanding", value: shareCount(outstanding) },
+          { label: "Share of the company sold", value: plainPct(fraction, 1) },
+          { label: "Equity value", value: money(metrics.marketCap) },
+        ],
+        memoLine: "The quote prices a thin slice of the shares. The equity value applies it to the whole company.",
+      })
+    }
+  }
+
+  const customers = annualText ? readCustomers(annualText) : []
+  const largest = customers[0]
+  if (largest && (largest.share >= 0.25 || customers.reduce((sum, stake) => sum + stake.share, 0) >= 0.5)) {
+    const owners = customersOwnShares(annualText, customers.map((stake) => stake.name))
+    const named = customers.map((stake) => `${stake.name} ${plainPct(stake.share, 1)}`).join(", ")
+    const serious = largest.share >= 0.4
+    traps.push({
+      id: "customer-concentration",
+      severity: serious ? "serious" : "watch",
+      title: "A few customers are the revenue",
+      looksLike: "A full year of profit, as if the revenue were a broad book of buyers.",
+      actually: `The latest annual report lists customers above a tenth of revenue: ${named}.${owners ? " The same filing says these customers are also shareholders." : ""} A year of profit that rests on that book is not a diversified stream, and the cash flow multiple does not know the names.`,
+      figures: [
+        ...customers.map((stake) => ({ label: stake.name, value: plainPct(stake.share, 1) })),
+        { label: "Revenue", value: money(metrics.revenue) },
+      ],
+      memoLine: serious ? `${largest.name} is ${plainPct(largest.share, 0)} of revenue.` : undefined,
+    })
+  }
 
   const addBacks = Math.abs(impairment ?? 0) + Math.abs(restructuring ?? 0)
   const proxy = metrics.operatingIncome != null && depreciation != null

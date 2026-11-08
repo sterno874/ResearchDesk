@@ -1,7 +1,7 @@
 import { Pips } from "@/components/Pips"
 import { gap, money, plainPct, price, ratio, when } from "@/lib/format"
 import { shorthand } from "@/lib/rank"
-import type { InvestorScore, Metrics, Part, Report, Trap } from "@/lib/types"
+import type { InvestorScore, Metrics, Part, Report, SectorBrief, Trap } from "@/lib/types"
 
 function tone(score: number | null): "helps" | "hurts" | "mixed" {
   if (score == null) return "mixed"
@@ -100,6 +100,37 @@ function TrapCard({ trap }: { trap: Trap }) {
     </article>
   )
 }
+function SectorSection({ sector }: { sector: SectorBrief }) {
+  return (
+    <section className="section">
+      <div className="section-head">
+        <h2>{sector.label}</h2>
+        <span className="eyebrow">How this sector is read</span>
+      </div>
+      <p className="sector-read">{sector.read}</p>
+      <div className="checks">
+        {sector.checks.map((item) => (
+          <div className="check" key={item.label}>
+            <span className="kicker">{item.label}</span>
+            <b>{item.value}</b>
+            <span>{item.note}</span>
+          </div>
+        ))}
+      </div>
+      {sector.studies.length ? (
+        <ul className="studies">
+          {sector.studies.map((study) => (
+            <li key={study.id}>
+              <span className="ticker">{study.phase}</span>
+              <span>{study.status}{study.when !== "—" ? ` · ${study.when}` : ""}</span>
+              <a href={study.url} target="_blank" rel="noreferrer">{study.title}</a>
+            </li>
+          ))}
+        </ul>
+      ) : sector.studiesNote ? <p className="vintage">{sector.studiesNote}</p> : null}
+    </section>
+  )
+}
 function metric(label: string, value: string) {
   return (
     <div className="metric" key={label}>
@@ -159,6 +190,7 @@ export function ReportView({ report }: { report: Report }) {
       </p>
       {read.fileNote ? <p className="file-note">{read.fileNote}</p> : null}
       <p className="reader-line">{headline}</p>
+      <SectorSection sector={report.sector} />
       <p className="deeper">
         <a className="btn" href={`/dive/${metrics.ticker}`}>Kick off a deep dive</a>
         <span>The report is the wide cut. The dive reads the annual report, then the proxy, one level at a time.</span>
@@ -186,7 +218,11 @@ export function ReportView({ report }: { report: Report }) {
         </div>
         <div className="metrics">{cells}</div>
         <p className="vintage">
-          Return on capital is after-tax operating income over equity plus debt minus cash. Free cash flow is cash from operations minus capital spending. Book is accounting equity, not a liquidation value.
+          {report.sector.id === "bank" || report.sector.id === "insurer"
+            ? "Return on equity is earnings over equity. Price to book is the price against that equity. Cash from operations on these statements is not owner earnings."
+            : report.sector.id === "reit"
+              ? "Free cash flow subtracts depreciation. A REIT takes that depreciation on purpose. Funds from operations are not in this feed."
+              : "Return on capital is after-tax operating income over equity plus debt minus cash. Free cash flow is cash from operations minus capital spending. Book is accounting equity, not a liquidation value."}
         </p>
       </section>
 

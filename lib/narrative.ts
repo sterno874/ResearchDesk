@@ -1,6 +1,7 @@
-import { addMonths, money, plainPct, price } from "./format"
+import { addMonths, money, plainPct, price, ratio } from "./format"
+import { developing, skipsMultiple } from "./sector"
 import { clamp } from "./stats"
-import type { InvestorScore, Memo, Metrics, Stage, Target, Trap } from "./types"
+import type { InvestorScore, Memo, Metrics, SectorId, Stage, Target, Trap } from "./types"
 
 function perShare(total: number | null, shares: number | null): number | null {
   if (total == null || !shares || shares <= 0) return null
@@ -247,22 +248,88 @@ function unclear(metrics: Metrics): Memo {
   }
 }
 
-export function buildMemo(metrics: Metrics): Memo {
+function withheld(label: string, summary: string, detail: string): Memo {
+  const target: Target = {
+    bear: null,
+    base: null,
+    bull: null,
+    fairNow: null,
+    method: "No free-cash-flow multiple is set. That multiple prices an operating company, and this filing is a different business.",
+    assumptions: [
+      "The bear, base, and bull prices are withheld on purpose.",
+      "Figures are the latest annual XBRL facts, set next to today's price. A quarter that just happened may not be in the annual line yet.",
+    ],
+  }
+  return {
+    kind: "unclear",
+    label,
+    summary,
+    stages: [{ when: "The statements", title: "What is actually being read", detail }],
+    target,
+  }
+}
+
+export function buildMemo(metrics: Metrics, sector: SectorId): Memo {
+  if (skipsMultiple(sector)) {
+    if (sector === "bank") {
+      return withheld(
+        "A bank, not a cash-flow multiple",
+        `Return on equity is ${plainPct(metrics.roe, 0)} and the price is ${metrics.pb == null ? "unknown" : `${ratio(metrics.pb, 2)}×`} book. Cash from operations is the bank's own statement, not owner earnings.`,
+        "The equity value of a bank is book and the return earned on it, through a credit cycle. A free-cash-flow yield here is the costume. Deposits and borrowings are the funding, and they are not a corporate bond stack sitting under an operating profit.",
+      )
+    }
+    if (sector === "insurer") {
+      return withheld(
+        "An insurer, not a cash-flow multiple",
+        `The price is ${metrics.pb == null ? "unknown" : `${ratio(metrics.pb, 2)}×`} book and the return on equity is ${plainPct(metrics.roe, 0)}. Underwriting and the investment book are in that return together.`,
+        "An insurer is read against book. This feed does not split underwriting profit from investment income, and it does not turn the statement into free cash flow for a multiple.",
+      )
+    }
+    return withheld(
+      "A property trust, not a cash-flow multiple",
+      `Revenue is ${money(metrics.revenue)} and the dividend yield is ${plainPct(metrics.dividendYield, 1)}. Free cash flow subtracts depreciation the buildings take on purpose.`,
+      "A REIT is rent, debt, and the distribution. Funds from operations are not a tag this desk reads, so no bear, base, or bull price is set from free cash flow.",
+    )
+  }
+  if (developing(sector, metrics)) {
+    const burn = metrics.fcf != null && metrics.fcf < 0 && metrics.cash != null && metrics.fcf !== 0
+      ? ` Cash of ${money(metrics.cash)} against free cash flow of ${money(metrics.fcf)} is about ${(-metrics.cash / metrics.fcf).toFixed(1)} years of that burn.`
+      : ""
+    return withheld(
+      "Studies and cash, not a multiple",
+      `Revenue is ${money(metrics.revenue)}. Profitable years on file: ${metrics.positiveEarningsYears} of ${metrics.earningsYears}.${burn}`,
+      "The price of a development-stage drug company is the studies and the cash, then the shares that get issued to keep the studies going. An earnings multiple waits until a product has a sales record. The open studies, when the register has them, are in the sector section.",
+    )
+  }
   const kind = pathKind(metrics)
   if (kind === "turnaround") return turnaround(metrics)
   if (kind === "compounder") return compounder(metrics)
   return unclear(metrics)
 }
 
-export function buildPitch(metrics: Metrics, memo: Memo, traps: Trap[]): string {
+export function buildPitch(metrics: Metrics, memo: Memo, traps: Trap[], sector: SectorId): string {
   const warning = traps.find((trap) => trap.memoLine && (trap.severity === "wall" || trap.severity === "serious"))?.memoLine ?? ""
-  const scale = `Revenue was ${money(metrics.revenue)}. Free cash flow was ${money(metrics.fcf)}.${metrics.marketCap != null ? ` The equity is worth ${money(metrics.marketCap)}.` : ""}`
+  const scale = skipsMultiple(sector)
+    ? `Equity is ${money(metrics.equity)}.${metrics.marketCap != null ? ` The equity is worth ${money(metrics.marketCap)}.` : ""}`
+    : developing(sector, metrics)
+      ? `Revenue was ${money(metrics.revenue)}. Cash is ${money(metrics.cash)}.${metrics.marketCap != null ? ` The equity is worth ${money(metrics.marketCap)}.` : ""}`
+      : `Revenue was ${money(metrics.revenue)}. Free cash flow was ${money(metrics.fcf)}.${metrics.marketCap != null ? ` The equity is worth ${money(metrics.marketCap)}.` : ""}`
   const wall = traps.some((trap) => trap.id === "maturity-wall")
   let play: string
   if (wall) {
     play = "The play is the debt coming due, not a cheap stock sitting under a pile of profit. The equity is a stub on that refinance."
   } else if (memo.kind === "turnaround") {
     play = `The play is a turnaround. Operating margin is ${plainPct(metrics.currentOperatingMargin, 1)} against ${plainPct(metrics.normalOperatingMargin, 1)} in this company's own earlier years. The case uses today's revenue and does not assume the old sales come back.`
+  } else if (sector === "staple" && memo.kind === "compounder") {
+    const fair = memo.target.fairNow
+    const priced = metrics.price != null && fair != null
+      ? ` A no-growth value on today's free cash flow is ${price(fair, metrics.currency)} a share, against ${price(metrics.price, metrics.currency)} in the market.`
+      : ""
+    play = `This is a consumer staple that already earns its keep. The record that matters is a gross margin that sits still and a dividend that kept being paid.${priced}`
+  } else if (sector === "software" && memo.kind === "compounder") {
+    play = `This files as software. The gross margin is ${plainPct(metrics.grossMargin, 0)}, which is the split between a product and a services shop. Return on capital is about ${plainPct(metrics.roic, 0)}.`
+  } else if (memo.kind === "compounder" && traps.some((trap) => trap.id === "fresh-listing")) {
+    play = `The filings show a business that earned its capital last year. Return on capital is about ${plainPct(metrics.roic, 0)}. The quote is not a long market for that year.`
   } else if (memo.kind === "compounder") {
     const fair = memo.target.fairNow
     const priced = metrics.price != null && fair != null
@@ -271,6 +338,8 @@ export function buildPitch(metrics: Metrics, memo: Memo, traps: Trap[]): string 
         ? ` A no-growth value on today's free cash flow is ${price(fair, metrics.currency)} a share.`
         : ""
     play = `The play is a business that already works. Return on capital is about ${plainPct(metrics.roic, 0)}. Nothing in the filings has to be rescued.${priced}`
+  } else if (skipsMultiple(sector) || developing(sector, metrics)) {
+    play = memo.summary
   } else {
     play = "The play is not a clean one. The filings do not show a margin waiting to revert, and they do not show a high-return business throwing off cash."
   }
