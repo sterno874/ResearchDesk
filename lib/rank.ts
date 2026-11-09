@@ -1,5 +1,5 @@
-import type { Report, Trap } from "./types"
 import { developing, skipsMultiple } from "./sector"
+import { SECTOR_SHORT, type Report, type SectorId, type Trap } from "./types"
 
 export type HorizonId = "quarters" | "years" | "decade" | "none"
 
@@ -22,7 +22,39 @@ export type BlotterRead = {
   deep?: number | null
   /** Quote versus the deep-value price, as a fraction of that price. Null when either price is missing. */
   deepGap?: number | null
+  /** Filing class. Absent on a read saved before the industry filter. */
+  sector?: SectorId
+  sectorLabel?: string
+  /** The specialist figures for that industry, in the order the report shows them. */
+  sectorLine?: string
+  /** Dividend coverage and the buyback price. Absent on a read saved before this field. */
+  payoutLine?: string
   readAt: string
+}
+
+const SPECIALIST = new Set([
+  "Book after goodwill",
+  "Efficiency ratio",
+  "Loans / deposits",
+  "Provision / loans",
+  "Charge-offs / loans",
+  "Claims / premiums",
+  "Acquisition costs / premiums",
+  "Inventory days",
+  "Contracted backlog",
+  "Research / sales",
+  "Cash against the burn",
+  "Cash cycle",
+  "Reserves / premiums",
+  "Revenue / interest",
+  "Held-to-maturity loss",
+])
+
+function sectorLine(report: Report): string {
+  return report.sector.checks
+    .filter((item) => SPECIALIST.has(item.label))
+    .map((item) => `${item.label} ${item.value}`)
+    .join(" · ")
 }
 
 const HORIZON_LABEL: Record<HorizonId, string> = {
@@ -167,6 +199,10 @@ export function shorthand(report: Report, now = new Date()): Omit<BlotterRead, "
     price: report.metrics.price,
     deep: report.memo.target.deep,
     deepGap: deepGap(report.metrics.price, report.memo.target.deep),
+    sector: report.sector.id,
+    sectorLabel: SECTOR_SHORT[report.sector.id],
+    sectorLine: sectorLine(report),
+    payoutLine: report.payout?.line ?? "",
     why: `${reader}${caution} ${clock}${file}`,
   }
 }

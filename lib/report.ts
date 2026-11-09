@@ -9,6 +9,8 @@ import { getQuote } from "./market"
 import { loadPositioning } from "./positioning"
 import { applyInstrumentDebt, applyStatedCapex, applyStatedInvestments, buildMetrics, investmentsMissing, quoteOnDepositary, statedCapitalSpending } from "./metrics"
 import { buildHeadline, buildMemo, buildPitch } from "./narrative"
+import { readInsiderTrades } from "./insider"
+import { readPayout } from "./payout"
 import { loadFacts, loadSubmissions, loadUniverse, normalizeTicker } from "./sec"
 import { describeSector, loadStudies, sectorId, takesDeposits } from "./sector"
 import { shorthand, statementGaps } from "./rank"
@@ -100,12 +102,20 @@ export const getReport = cache(async (raw: string, fresh = false): Promise<Repor
   const submissions = submissionsResult.status === "fulfilled" ? submissionsResult.value : null
   const filedAs = sectorId(submissions?.sic ?? null, submissions?.sicDescription ?? null)
   const id = filedAs === "operating" && takesDeposits(factsResult.value) ? "bank" : filedAs
+  const trades = await readInsiderTrades(company.cik, submissions, fresh)
+  metrics = {
+    ...metrics,
+    insiderBought: trades.bought,
+    insiderSold: trades.sold,
+    insiderFormsRead: trades.read,
+  }
   const investors = scoreAll(metrics, id).sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
   const [trials, field] = await Promise.all([
     loadStudies(id, company.name, company.cik, fresh),
     loadField({
       company,
       metrics,
+      facts: factsResult.value,
       sector: id,
       sic: submissions?.sic ?? null,
       sicDescription: submissions?.sicDescription ?? null,
@@ -113,12 +123,12 @@ export const getReport = cache(async (raw: string, fresh = false): Promise<Repor
       fresh,
     }),
   ])
-  const sector = describeSector(id, metrics, trials.studies, trials.note)
+  const sector = describeSector(id, metrics, factsResult.value, trials.studies, trials.note)
   const positioning = await positioningPromise.catch(() => null)
   if (positioning && metrics.shares != null && metrics.shares > 0 && positioning.shortInterest != null) {
     positioning.shortPercent = positioning.shortInterest / metrics.shares
   }
-  const draft = buildMemo(metrics, id)
+  const draft = buildMemo(metrics, id, factsResult.value)
   const traps = buildTraps({
     facts: factsResult.value,
     metrics,
@@ -130,6 +140,7 @@ export const getReport = cache(async (raw: string, fresh = false): Promise<Repor
     annualText,
   })
   const memo = attachWall(draft, traps)
+  const payout = readPayout(factsResult.value, metrics, id, memo.target.deep)
   const overview = annualResult.status === "fulfilled" && annualResult.value
     ? readOverview(annualResult.value.html)
     : ""
@@ -162,6 +173,7 @@ export const getReport = cache(async (raw: string, fresh = false): Promise<Repor
     gaps,
     sector,
     field,
+    payout,
     positioning: positioning ?? {
       shortInterest: null,
       shortPrior: null,

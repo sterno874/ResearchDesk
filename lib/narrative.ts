@@ -1,5 +1,6 @@
 import { addMonths, money, plainPct, price, ratio } from "./format"
-import { developing, skipsMultiple } from "./sector"
+import type { CompanyFacts } from "./sec"
+import { bookAfterGoodwill, developing, skipsMultiple } from "./sector"
 import { clamp } from "./stats"
 import type { InvestorScore, Memo, Metrics, SectorId, Stage, Target, Trap } from "./types"
 
@@ -297,7 +298,7 @@ function withheld(label: string, summary: string, detail: string, method?: strin
   }
 }
 
-function deepValue(metrics: Metrics, sector: SectorId): { price: number | null; note: string } {
+function deepValue(metrics: Metrics, sector: SectorId, facts: CompanyFacts): { price: number | null; note: string } {
   if (metrics.statementCurrency && metrics.statementCurrency !== metrics.currency) {
     return {
       price: null,
@@ -307,6 +308,15 @@ function deepValue(metrics: Metrics, sector: SectorId): { price: number | null; 
   const book = metrics.bookPerShare != null && metrics.bookPerShare > 0 ? metrics.bookPerShare : null
   const paidDown = metrics.netIncome != null && metrics.equity != null && metrics.equity > 0 && metrics.netIncome > metrics.equity
   if (skipsMultiple(sector)) {
+    if (sector === "bank") {
+      const capital = bookAfterGoodwill(facts, metrics)
+      if (capital) {
+        return {
+          price: capital.perShare,
+          note: `Deep value here is book after goodwill of ${money(capital.goodwill, metrics.statementCurrency ?? metrics.currency)}. Goodwill is not capital a buyer can use. An earnings multiple is not used.`,
+        }
+      }
+    }
     return book == null
       ? { price: null, note: "Deep value for this statement is book value per share. Book was not available." }
       : { price: book, note: "Deep value here is book value per share. An earnings multiple is not used on this statement." }
@@ -328,19 +338,19 @@ function deepValue(metrics: Metrics, sector: SectorId): { price: number | null; 
   }
 }
 
-function stamp(memo: Memo, metrics: Metrics, sector: SectorId): Memo {
-  const line = deepValue(metrics, sector)
+function stamp(memo: Memo, metrics: Metrics, sector: SectorId, facts: CompanyFacts): Memo {
+  const line = deepValue(metrics, sector, facts)
   return { ...memo, target: { ...memo.target, deep: line.price, deepNote: line.note } }
 }
 
-export function buildMemo(metrics: Metrics, sector: SectorId): Memo {
+export function buildMemo(metrics: Metrics, sector: SectorId, facts: CompanyFacts): Memo {
   if (metrics.statementCurrency && metrics.statementCurrency !== metrics.currency) {
     return stamp(withheld(
       "Different currencies",
       `The annual figures are in ${metrics.statementCurrency}. The quote is in ${metrics.currency}. Revenue was ${money(metrics.revenue, metrics.statementCurrency)}.`,
       "A per-share price divides a statement total by the share count and sets it next to the quote. Those two numbers are not the same currency, and the filing feed did not give the exchange rate. The price is withheld.",
       "No per-share price is set. The statements and the quote are in different currencies.",
-    ), metrics, sector)
+    ), metrics, sector, facts)
   }
   if (skipsMultiple(sector)) {
     if (sector === "bank") {
@@ -348,20 +358,20 @@ export function buildMemo(metrics: Metrics, sector: SectorId): Memo {
         "A bank, not a cash-flow multiple",
         `Return on equity is ${plainPct(metrics.roe, 0)} and the price is ${metrics.pb == null ? "unknown" : `${ratio(metrics.pb, 2)}×`} book. Cash from operations is the bank's own statement, not owner earnings.`,
         "The equity value of a bank is book and the return earned on it, through a credit cycle. A free-cash-flow yield here is the costume. Deposits and borrowings are the funding, and they are not a corporate bond stack sitting under an operating profit.",
-      ), metrics, sector)
+      ), metrics, sector, facts)
     }
     if (sector === "insurer") {
       return stamp(withheld(
         "An insurer, not a cash-flow multiple",
         `The price is ${metrics.pb == null ? "unknown" : `${ratio(metrics.pb, 2)}×`} book and the return on equity is ${plainPct(metrics.roe, 0)}. Underwriting and the investment book are in that return together.`,
         "An insurer is read against book. This feed does not split underwriting profit from investment income, and it does not turn the statement into free cash flow for a multiple.",
-      ), metrics, sector)
+      ), metrics, sector, facts)
     }
     return stamp(withheld(
       "A property trust, not a cash-flow multiple",
       `Revenue is ${money(metrics.revenue)} and the dividend yield is ${plainPct(metrics.dividendYield, 1)}. Free cash flow subtracts depreciation the buildings take on purpose.`,
       "A REIT is rent, debt, and the distribution. Funds from operations are not a tag this desk reads, so no bear, base, or bull price is set from free cash flow.",
-    ), metrics, sector)
+    ), metrics, sector, facts)
   }
   if (developing(sector, metrics)) {
     const burn = metrics.fcf != null && metrics.fcf < 0 && metrics.cash != null && metrics.fcf !== 0
@@ -371,7 +381,7 @@ export function buildMemo(metrics: Metrics, sector: SectorId): Memo {
       "Studies and cash, not a multiple",
       `Revenue is ${money(metrics.revenue)}. Profitable years on file: ${metrics.positiveEarningsYears} of ${metrics.earningsYears}.${burn}`,
       "The price of a development-stage drug company is the studies and the cash, then the shares that get issued to keep the studies going. An earnings multiple waits until a product has a sales record. The open studies, when the register has them, are in the sector section.",
-    ), metrics, sector)
+    ), metrics, sector, facts)
   }
   if (spendingMissing(metrics)) {
     return stamp(withheld(
@@ -379,12 +389,12 @@ export function buildMemo(metrics: Metrics, sector: SectorId): Memo {
       `Cash from operations was ${money(metrics.cfo)}. The filing feed has no capital-spending line for that year, so free cash flow is left blank.`,
       "Free cash flow is cash from operations minus capital spending. A missing spending line is not a year with no spending. No bear, base, or bull price is set from that cash.",
       "No free-cash-flow price is set. Capital spending was not in the filing feed.",
-    ), metrics, sector)
+    ), metrics, sector, facts)
   }
   const kind = pathKind(metrics)
-  if (kind === "turnaround") return stamp(turnaround(metrics), metrics, sector)
-  if (kind === "compounder") return stamp(compounder(metrics), metrics, sector)
-  return stamp(unclear(metrics), metrics, sector)
+  if (kind === "turnaround") return stamp(turnaround(metrics), metrics, sector, facts)
+  if (kind === "compounder") return stamp(compounder(metrics), metrics, sector, facts)
+  return stamp(unclear(metrics), metrics, sector, facts)
 }
 
 export function buildPitch(metrics: Metrics, memo: Memo, traps: Trap[], sector: SectorId): string {

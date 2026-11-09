@@ -106,7 +106,19 @@ export type Metrics = {
   filingsLoaded: boolean
   schedule13d: boolean
   insiderForms: number
+  /** Open-market shares bought on Form 4s read this pass. Absent until the forms are fetched. */
+  insiderBought?: number
+  /** Open-market shares sold on Form 4s read this pass. */
+  insiderSold?: number
+  /** How many Form 4 XML files were read. Zero means the index was all we had. */
+  insiderFormsRead?: number
   warnings: string[]
+}
+
+/** Dividends and repurchases from the annual statement. Not an input to the stars. */
+export type Payout = {
+  line: string
+  note: string
 }
 
 export type Part = {
@@ -192,6 +204,23 @@ export type SectorId =
   | "telecom"
   | "operating"
 
+export const SECTOR_SHORT: Record<SectorId, string> = {
+  biotech: "Biotech",
+  pharma: "Pharma",
+  bank: "Bank",
+  insurer: "Insurance",
+  reit: "REIT",
+  utility: "Utility",
+  energy: "Energy",
+  staple: "Staple",
+  retail: "Retail",
+  software: "Software",
+  chip: "Chips",
+  auto: "Auto",
+  telecom: "Telecom",
+  operating: "Operating",
+}
+
 export type SectorCheck = {
   label: string
   value: string
@@ -266,6 +295,8 @@ export type Report = {
   sector: SectorBrief
   field: FieldBrief
   positioning: Positioning
+  /** Dividends and repurchases. Absent on a report built before this section. */
+  payout?: Payout | null
   /** True when this pass ignored the saved facts, annual report, and proxy. */
   pulledFresh: boolean
 }

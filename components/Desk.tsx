@@ -5,7 +5,24 @@ import { Pips } from "@/components/Pips"
 import { gap, price } from "@/lib/format"
 import type { BlotterRead } from "@/lib/rank"
 import { apiUrl } from "@/lib/remote"
-import type { CollectSummary, Idea, SourceKind } from "@/lib/types"
+import { SECTOR_SHORT, type CollectSummary, type Idea, type SectorId, type SourceKind } from "@/lib/types"
+
+const INDUSTRIES: SectorId[] = [
+  "bank",
+  "insurer",
+  "reit",
+  "utility",
+  "energy",
+  "staple",
+  "retail",
+  "software",
+  "chip",
+  "auto",
+  "telecom",
+  "pharma",
+  "biotech",
+  "operating",
+]
 
 const FILTERS: { id: "all" | "saved" | "deep" | SourceKind; label: string }[] = [
   { id: "all", label: "All" },
@@ -71,6 +88,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
   const [summary, setSummary] = useState<CollectSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("all")
+  const [industry, setIndustry] = useState<SectorId | "all">("all")
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<(typeof SORTS)[number]["id"]>("rank")
   const [reads, setReads] = useState<Record<string, BlotterRead>>({})
@@ -92,7 +110,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
         const freshCutoff = Date.now() - 12 * 60 * 60 * 1000
         const missing = tickers.filter((ticker) => {
           const read = have[ticker]
-          return !read || !Object.prototype.hasOwnProperty.call(read, "deepGap") || Date.parse(read.readAt) < freshCutoff
+          return !read || !Object.prototype.hasOwnProperty.call(read, "deepGap") || !Object.prototype.hasOwnProperty.call(read, "sector") || !Object.prototype.hasOwnProperty.call(read, "payoutLine") || Date.parse(read.readAt) < freshCutoff
         })
         for (let index = 0; index < missing.length; index += 4) {
           if (cancel) return
@@ -134,6 +152,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
       if (filter === "deep") return hasDeepGap(reads[idea.ticker])
       return idea.sources.some((source) => source.kind === filter)
     })
+    .filter((idea) => industry === "all" || reads[idea.ticker]?.sector === industry)
     .sort((a, b) => {
       if (filter === "deep" && sort === "rank") {
         const left = fromHere(reads[a.ticker])
@@ -155,6 +174,19 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
     })
 
   const rankedCount = ideas.filter((idea) => reads[idea.ticker]).length
+  const industries = INDUSTRIES.filter((id) => ideas.some((idea) => reads[idea.ticker]?.sector === id))
+  const unread = ideas.some((idea) => !reads[idea.ticker]?.sector)
+  const industryName = industry === "all" ? null : SECTOR_SHORT[industry]
+  const rankNote = filter === "deep" && sort === "rank"
+    ? industryName
+      ? ` ${industryName} names, ordered by how far the quote would have to move to reach the deep-value price, closest first. The stars are unchanged.`
+      : " This list is how far the quote would have to move to reach the deep-value price, closest first. The stars are unchanged."
+    : industryName
+      ? ` ${industryName} only. The stars are still the reader median.`
+      : ""
+  const waitingNote = industry !== "all" && unread && ranking
+    ? " Names still being read stay off this list until the filing says the industry."
+    : ""
 
   async function collect() {
     setBusy("collect")
@@ -298,11 +330,21 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
           ))}
         </div>
       </div>
+      {industries.length ? (
+        <div className="filters" role="group" aria-label="Filter by industry">
+          <button type="button" aria-pressed={industry === "all"} onClick={() => setIndustry("all")}>All industries</button>
+          {industries.map((id) => (
+            <button key={id} type="button" aria-pressed={industry === id} onClick={() => setIndustry(id)}>
+              {SECTOR_SHORT[id]}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <p className="status">
         {ranking
-          ? `Reading filings for a rank. ${rankedCount} of ${ideas.length} ${ideas.length === 1 ? "name has" : "names have"} one.`
+          ? `Reading filings for a rank. ${rankedCount} of ${ideas.length} ${ideas.length === 1 ? "name has" : "names have"} one.${rankNote}${waitingNote}`
           : rankedCount
-            ? `${rankedCount} of ${ideas.length} ranked from the latest report.${filter === "deep" && sort === "rank" ? " This list is how far the quote would have to move to reach the deep-value price, closest first. The stars are unchanged." : ""}`
+            ? `${rankedCount} of ${ideas.length} ranked from the latest report.${rankNote}${waitingNote}`
             : null}
       </p>
 
@@ -315,11 +357,19 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
                 ? "Nothing in this filter matches that."
                 : needle
                   ? "Nothing on the desk matches that."
-                  : filter === "deep"
+                  : filter === "deep" && industry !== "all"
                     ? ranking
-                      ? "Reading the filings for a deep-value price."
-                      : "None of these names has a deep-value price on the latest read."
-                    : "Nothing in this filter."}
+                      ? "Reading the filings for a deep-value price in this industry."
+                      : "None of the names in this industry has a deep-value price on the latest read."
+                    : filter === "deep"
+                      ? ranking
+                        ? "Reading the filings for a deep-value price."
+                        : "None of these names has a deep-value price on the latest read."
+                      : industry !== "all"
+                        ? ranking
+                          ? "Reading the filings. This industry appears once a report is in."
+                          : "No names in this industry on the latest read."
+                        : "Nothing in this filter."}
           </p>
         </div>
       ) : (
@@ -343,6 +393,10 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
                 </a>
                 <a href={`/report/${idea.ticker}`}>
                   <h3>{idea.name}</h3>
+                  {read?.sectorLabel ? (
+                    <p className="sector-line">{read.sectorLine ? `${read.sectorLabel} · ${read.sectorLine}` : read.sectorLabel}</p>
+                  ) : null}
+                  {read?.payoutLine ? <p className="sector-line">{read.payoutLine}</p> : null}
                   <p>{lead?.title}</p>
                   <div className="chips">
                     {idea.sources.map((source) => (

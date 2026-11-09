@@ -3,6 +3,7 @@ import { getQuote } from "./market"
 import { buildMetrics } from "./metrics"
 import { readEntry, writeEntry } from "./persist"
 import { loadFacts, type Company, type CompanyFacts, type Universe } from "./sec"
+import { developing, fieldFigures, type FieldFigures } from "./sector"
 import { median } from "./stats"
 import type { FieldBrief, FieldRow, Metrics, SectorId } from "./types"
 
@@ -31,9 +32,17 @@ type Snap = {
   marketCap: number | null
   loss: boolean
   priced: boolean
+  efficiency: number | null
+  loansToDeposits: number | null
+  lossRatio: number | null
+  inventoryDays: number | null
+  backlogYears: number | null
+  researchShare: number | null
 }
 
-type RowKey = "grossMargin" | "operatingMargin" | "roe" | "revenueChange3y" | "debtToEquity" | "fcfMargin" | "pe" | "pb"
+type RowKey = "grossMargin" | "operatingMargin" | "roe" | "revenueChange3y" | "debtToEquity" | "fcfMargin" | "pe" | "pb" | keyof FieldFigures
+
+const HEAVIER = new Set<RowKey>(["debtToEquity", "pe", "pb", "efficiency", "lossRatio", "inventoryDays", "loansToDeposits"])
 
 const TAGS: { tag: string; rank: number }[] = [
   { tag: "RevenueFromContractWithCustomerExcludingAssessedTax", rank: 0 },
@@ -133,6 +142,7 @@ function fcfMargin(metrics: Metrics): number | null {
 
 function snapFrom(company: Company, facts: CompanyFacts, quote: Awaited<ReturnType<typeof getQuote>> | null): Snap {
   const metrics = buildMetrics({ company, facts, submissions: null, quote })
+  const figures = fieldFigures(facts, metrics)
   return {
     ticker: company.ticker,
     name: company.name,
@@ -149,6 +159,7 @@ function snapFrom(company: Company, facts: CompanyFacts, quote: Awaited<ReturnTy
     marketCap: metrics.marketCap,
     loss: metrics.netIncome != null && metrics.netIncome <= 0,
     priced: metrics.priced,
+    ...figures,
   }
 }
 
@@ -168,7 +179,7 @@ async function inBatches<T, R>(items: T[], size: number, run: (item: T) => Promi
 
 async function peerSnaps(companies: Company[], fresh: boolean, sic: string): Promise<Snap[]> {
   if (!fresh) {
-    const cached = await readJson<Snap[]>(`field-snaps-v11-${sic}.json`, 12 * 60 * 60 * 1000)
+    const cached = await readJson<Snap[]>(`field-snaps-v12-${sic}.json`, 12 * 60 * 60 * 1000)
     const want = new Set(companies.map((company) => company.cik))
     const picked = cached?.filter((snap) => want.has(snap.cik)) ?? []
     if (want.size > 0 && picked.length === want.size) return picked
@@ -184,14 +195,24 @@ async function peerSnaps(companies: Company[], fresh: boolean, sic: string): Pro
       return null
     }
   })).filter((snap): snap is Snap => snap != null)
-  if (snaps.length) await writeEntry(`cache/field-snaps-v11-${sic}.json`, JSON.stringify(snaps)).catch(() => undefined)
+  if (snaps.length) await writeEntry(`cache/field-snaps-v12-${sic}.json`, JSON.stringify(snaps)).catch(() => undefined)
   return snaps
 }
 
-function rowsFor(sector: SectorId): { key: RowKey; label: string; format: "pct" | "ratio" | "multiple" }[] {
-  if (sector === "bank" || sector === "insurer") {
+function rowsFor(sector: SectorId, metrics: Metrics): { key: RowKey; label: string; format: "pct" | "ratio" | "multiple" | "days" | "years" }[] {
+  if (sector === "bank") {
     return [
       { key: "roe", label: "Return on equity", format: "pct" },
+      { key: "efficiency", label: "Efficiency ratio", format: "pct" },
+      { key: "loansToDeposits", label: "Loans / deposits", format: "pct" },
+      { key: "revenueChange3y", label: "Revenue, three years", format: "pct" },
+      { key: "pb", label: "Price / book", format: "multiple" },
+    ]
+  }
+  if (sector === "insurer") {
+    return [
+      { key: "roe", label: "Return on equity", format: "pct" },
+      { key: "lossRatio", label: "Claims / premiums", format: "pct" },
       { key: "revenueChange3y", label: "Revenue, three years", format: "pct" },
       { key: "pb", label: "Price / book", format: "multiple" },
     ]
@@ -204,7 +225,7 @@ function rowsFor(sector: SectorId): { key: RowKey; label: string; format: "pct" 
       { key: "pb", label: "Price / book", format: "multiple" },
     ]
   }
-  return [
+  const rows: { key: RowKey; label: string; format: "pct" | "ratio" | "multiple" | "days" | "years" }[] = [
     { key: "grossMargin", label: "Gross margin", format: "pct" },
     { key: "operatingMargin", label: "Operating margin", format: "pct" },
     { key: "roe", label: "Return on equity", format: "pct" },
@@ -214,19 +235,30 @@ function rowsFor(sector: SectorId): { key: RowKey; label: string; format: "pct" 
     { key: "pe", label: "Price / earnings", format: "multiple" },
     { key: "pb", label: "Price / book", format: "multiple" },
   ]
+  if (sector === "retail" || sector === "chip" || sector === "auto") {
+    rows.splice(4, 0, { key: "inventoryDays", label: "Inventory days", format: "days" })
+  }
+  if (sector === "software") rows.splice(6, 0, { key: "backlogYears", label: "Contracted backlog", format: "years" })
+  if (sector === "pharma" && !developing(sector, metrics)) {
+    rows.splice(6, 0, { key: "researchShare", label: "Research / sales", format: "pct" })
+  }
+  return rows
 }
 
-function companyNumber(metrics: Metrics, key: RowKey): number | null {
+function companyNumber(metrics: Metrics, key: RowKey, figures: FieldFigures): number | null {
   if (key === "fcfMargin") return fcfMargin(metrics)
   if (key === "roe") return metrics.roeAvg
-  return metrics[key]
+  if (key in figures) return figures[key as keyof FieldFigures]
+  return metrics[key as "grossMargin"]
 }
 
-function formatValue(key: RowKey, format: "pct" | "ratio" | "multiple", value: number | null, loss = false, priced = false): string {
+function formatValue(key: RowKey, format: "pct" | "ratio" | "multiple" | "days" | "years", value: number | null, loss = false, priced = false): string {
   if (key === "pe" && loss && priced) return "Losses"
   if (value == null) return "—"
   if (format === "pct") return plainPct(value, 1)
   if (format === "ratio") return ratio(value)
+  if (format === "days") return `${Math.round(value)} days`
+  if (format === "years") return `${value.toFixed(1)} years`
   return `${ratio(value, 1)}×`
 }
 
@@ -242,6 +274,7 @@ function sits(company: number | null, field: number | null, count: number, highe
 export async function loadField(input: {
   company: Company
   metrics: Metrics
+  facts: CompanyFacts
   sector: SectorId
   sic: string | null
   sicDescription: string | null
@@ -275,13 +308,14 @@ export async function loadField(input: {
           : `No other large USD filer in ${label} had a readable annual revenue in the SEC frame.`,
       )
     }
-    const rows: FieldRow[] = rowsFor(input.sector).map((row) => {
+    const figures = fieldFigures(input.facts, input.metrics)
+    const rows: FieldRow[] = rowsFor(input.sector, input.metrics).map((row) => {
       const values = peers
         .map((peer) => peer[row.key])
         .filter((value): value is number => value != null && Number.isFinite(value))
       const mid = values.length >= MIN_FOR_MEDIAN ? median(values) : null
-      const own = companyNumber(input.metrics, row.key)
-      const higher = row.key === "debtToEquity" || row.key === "pe" || row.key === "pb"
+      const own = companyNumber(input.metrics, row.key, figures)
+      const higher = HEAVIER.has(row.key)
       return {
         label: row.label,
         company: formatValue(row.key, row.format, own, input.metrics.netIncome != null && input.metrics.netIncome <= 0, input.metrics.priced),
@@ -295,7 +329,7 @@ export async function loadField(input: {
       label,
       peers: peers.map((peer) => ({ ticker: peer.ticker, name: peer.name })),
       rows,
-      note: `The field is the other large USD filers in ${label}: ${names}. Large means at least 5% of the biggest revenue in that SIC code, using the latest annual figure in the SEC frame. This company is left out of the median. A row stays blank when fewer than two of them report that figure. Above means the figure is higher. Debt and the price multiples say Higher or Lower, because a higher one is not a healthier business. Return on equity is the average of recent years, and a year whose earnings were larger than the book is left out.`,
+      note: `The field is the other large USD filers in ${label}: ${names}. Large means at least 5% of the biggest revenue in that SIC code, using the latest annual figure in the SEC frame. This company is left out of the median. A row stays blank when fewer than two of them report that figure. Above means the figure is higher. Debt, the price multiples, efficiency, claims over premiums, loans over deposits, and inventory days say Higher or Lower, because a higher one is not a healthier business. Return on equity is the average of recent years, and a year whose earnings were larger than the book is left out.`,
     }
   } catch {
     return emptyField(sic, label, "The industry list didn't load, so there is no field to compare.")

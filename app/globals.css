@@ -379,6 +379,14 @@ input[type="search"]::-webkit-search-cancel-button {
   color: var(--ink-soft);
 }
 
+.sector-line {
+  margin: 6px 0 8px;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
 .shorthand {
   display: flex;
   flex-wrap: wrap;

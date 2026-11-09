@@ -1,4 +1,4 @@
-import { money, plainPct, price, ratio } from "./format"
+import { count, money, plainPct, price, ratio } from "./format"
 import { round, scale } from "./stats"
 import type { InvestorScore, Metrics, Part, SectorId } from "./types"
 
@@ -451,10 +451,30 @@ function scoreKlarman(metrics: Metrics): InvestorScore {
     catalystScore = 7
     catalystReading = "Operating margin turned up, still below its own history"
     catalystNote = "The margin is depressed and the latest year is better than the one before. That is a possible inflection, not a promise."
+  } else if ((metrics.insiderFormsRead ?? 0) > 0) {
+    const bought = metrics.insiderBought ?? 0
+    const sold = metrics.insiderSold ?? 0
+    if (bought > 0 && sold === 0) {
+      catalystScore = 7
+      catalystReading = `Insiders bought ${count(bought)} shares in the open market`
+      catalystNote = "The Form 4s tag the shares acquired. These were open-market purchases, transaction code P, not grants or withholding."
+    } else if (sold > 0 && bought === 0) {
+      catalystScore = 2
+      catalystReading = `Insiders sold ${count(sold)} shares in the open market`
+      catalystNote = "The Form 4s tag the shares disposed. Open-market sales are not a reason a gap closes."
+    } else if (bought > 0 && sold > 0) {
+      catalystScore = 4
+      catalystReading = `Insiders bought ${count(bought)} and sold ${count(sold)}`
+      catalystNote = "The forms show both open-market purchases and sales. That is activity, not a one-way push."
+    } else {
+      catalystScore = 4
+      catalystReading = `${metrics.insiderForms} Form 4${metrics.insiderForms === 1 ? "" : "s"} with no open-market buy or sell`
+      catalystNote = "The forms were read. The share movements were grants, exercises, or withholding, not open-market purchases or sales."
+    }
   } else if (metrics.insiderForms > 0) {
     catalystScore = 4
     catalystReading = `${metrics.insiderForms} Form 4${metrics.insiderForms === 1 ? "" : "s"} in the last four months`
-    catalystNote = "Insiders filed. The submissions index does not say whether they bought or sold, so this gets partial credit only."
+    catalystNote = "Insiders filed. The forms were not read on this pass, so this gets partial credit only."
   }
   let safetyScore: number | null = null
   let safetyReading = "—"

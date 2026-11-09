@@ -1,7 +1,7 @@
 import { Pips } from "@/components/Pips"
 import { count, gap, money, pct, plainPct, price, ratio, when } from "@/lib/format"
 import { shorthand } from "@/lib/rank"
-import type { FieldBrief, InvestorScore, Metrics, Part, Positioning, Report, SectorBrief, Trap } from "@/lib/types"
+import type { FieldBrief, InvestorScore, Metrics, Part, Payout, Positioning, Report, SectorBrief, Trap } from "@/lib/types"
 
 function tone(score: number | null): "helps" | "hurts" | "mixed" {
   if (score == null) return "mixed"
@@ -131,6 +131,17 @@ function SectorSection({ sector }: { sector: SectorBrief }) {
     </section>
   )
 }
+function PayoutSection({ payout }: { payout: Payout }) {
+  return (
+    <section className="section">
+      <div className="section-head">
+        <h2>What was returned</h2>
+        <span className="eyebrow">{payout.line}</span>
+      </div>
+      <p className="vintage">{payout.note}</p>
+    </section>
+  )
+}
 function FieldSection({ field }: { field: FieldBrief }) {
   return (
     <section className="section">
@@ -248,6 +259,7 @@ export function ReportView({ report }: { report: Report }) {
       {read.fileNote ? <p className="file-note">{read.fileNote}</p> : null}
       <p className="reader-line">{headline}</p>
       <SectorSection sector={report.sector} />
+      {report.payout ? <PayoutSection payout={report.payout} /> : null}
       <p className="deeper">
         <a className="btn" href={`/dive/${metrics.ticker}`}>Kick off a deep dive</a>
         <a className="btn ghost" href={`/report/${metrics.ticker}?fresh=1`}>Refresh the filings</a>
