@@ -13,7 +13,7 @@ const STEPS = [
   },
   {
     title: "The report",
-    body: "Open a name. The first lines are the company, in a sentence from the annual report, and the play: the bet in the filings, with the price and the warning. Under that sit the marks, the clock, and the closest reader, with the dissent named. The numbers, the six rubrics, the path, and the recent filings follow.",
+    body: "Open a name. The first lines are the company, in a sentence from the annual report, and the play: the bet in the filings, with the price and the warning. Under that sit the marks, the clock, and the closest reader, with the dissent named. The numbers, the six rubrics, the path, and the recent filings follow. The calendar lists dates the filing or the trial register already has. A phase 3 primary completion is dark red. A routine report date is deep blue. The color is how much that kind of event can move the price. It does not change the stars.",
   },
   {
     title: "Where it looks better than it is",

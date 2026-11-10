@@ -1,7 +1,8 @@
 import { Pips } from "@/components/Pips"
 import { count, gap, money, pct, plainPct, price, ratio, when } from "@/lib/format"
 import { shorthand } from "@/lib/rank"
-import type { FieldBrief, InvestorScore, Metrics, Part, Payout, Positioning, Report, SectorBrief, Trap } from "@/lib/types"
+import { heatColor } from "@/lib/events"
+import type { DeskEvent, FieldBrief, InvestorScore, Metrics, Part, Payout, Positioning, Report, SectorBrief, Trap } from "@/lib/types"
 
 function tone(score: number | null): "helps" | "hurts" | "mixed" {
   if (score == null) return "mixed"
@@ -131,6 +132,30 @@ function SectorSection({ sector }: { sector: SectorBrief }) {
     </section>
   )
 }
+function CalendarSection({ events }: { events: DeskEvent[] }) {
+  if (!events.length) return null
+  return (
+    <section className="section">
+      <div className="section-head">
+        <h2>Calendar</h2>
+        <a className="eyebrow" href="/calendar">Desk calendar</a>
+      </div>
+      <ul className="event-list">
+        {events.map((event) => (
+          <li key={`${event.date}-${event.label}-${event.detail.slice(0, 24)}`}>
+            <span className="heat" style={{ background: heatColor(event.heat) }} />
+            <time dateTime={event.date}>{when(event.date)}</time>
+            <span>
+              <b>{event.label}</b>
+              <span className="vintage">{event.detail}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 function PayoutSection({ payout }: { payout: Payout }) {
   return (
     <section className="section">
@@ -260,6 +285,7 @@ export function ReportView({ report }: { report: Report }) {
       <p className="reader-line">{headline}</p>
       <SectorSection sector={report.sector} />
       {report.payout ? <PayoutSection payout={report.payout} /> : null}
+      <CalendarSection events={report.events ?? []} />
       <p className="deeper">
         <a className="btn" href={`/dive/${metrics.ticker}`}>Kick off a deep dive</a>
         <a className="btn ghost" href={`/report/${metrics.ticker}?fresh=1`}>Refresh the filings</a>

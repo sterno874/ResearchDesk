@@ -1,5 +1,5 @@
 import { developing, skipsMultiple } from "./sector"
-import { SECTOR_SHORT, type Report, type SectorId, type Trap } from "./types"
+import { SECTOR_SHORT, type DeskEvent, type Report, type SectorId, type Trap } from "./types"
 
 export type HorizonId = "quarters" | "years" | "decade" | "none"
 
@@ -29,6 +29,8 @@ export type BlotterRead = {
   sectorLine?: string
   /** Dividend coverage and the buyback price. Absent on a read saved before this field. */
   payoutLine?: string
+  /** Dated events for the calendar. Absent on a read saved before this field. */
+  events?: DeskEvent[]
   readAt: string
 }
 
@@ -203,6 +205,7 @@ export function shorthand(report: Report, now = new Date()): Omit<BlotterRead, "
     sectorLabel: SECTOR_SHORT[report.sector.id],
     sectorLine: sectorLine(report),
     payoutLine: report.payout?.line ?? "",
+    events: report.events ?? [],
     why: `${reader}${caution} ${clock}${file}`,
   }
 }

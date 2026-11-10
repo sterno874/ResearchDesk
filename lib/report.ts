@@ -9,6 +9,7 @@ import { getQuote } from "./market"
 import { loadPositioning } from "./positioning"
 import { applyInstrumentDebt, applyStatedCapex, applyStatedInvestments, buildMetrics, investmentsMissing, quoteOnDepositary, statedCapitalSpending } from "./metrics"
 import { buildHeadline, buildMemo, buildPitch } from "./narrative"
+import { collectEvents } from "./events"
 import { readInsiderTrades } from "./insider"
 import { readPayout } from "./payout"
 import { loadFacts, loadSubmissions, loadUniverse, normalizeTicker } from "./sec"
@@ -141,6 +142,14 @@ export const getReport = cache(async (raw: string, fresh = false): Promise<Repor
   })
   const memo = attachWall(draft, traps)
   const payout = readPayout(factsResult.value, metrics, id, memo.target.deep)
+  const events = collectEvents({
+    ticker: metrics.ticker,
+    filings: metrics.filings,
+    studies: trials.studies,
+    traps,
+    kind: memo.kind,
+    marks: trades.marks,
+  })
   const overview = annualResult.status === "fulfilled" && annualResult.value
     ? readOverview(annualResult.value.html)
     : ""
@@ -174,6 +183,7 @@ export const getReport = cache(async (raw: string, fresh = false): Promise<Repor
     sector,
     field,
     payout,
+    events,
     positioning: positioning ?? {
       shortInterest: null,
       shortPrior: null,

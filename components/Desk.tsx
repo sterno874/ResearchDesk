@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState, type FormEvent } from "react"
+import { EventCalendar } from "@/components/Calendar"
 import { Pips } from "@/components/Pips"
 import { gap, price } from "@/lib/format"
 import type { BlotterRead } from "@/lib/rank"
@@ -93,6 +94,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
   const [sort, setSort] = useState<(typeof SORTS)[number]["id"]>("rank")
   const [reads, setReads] = useState<Record<string, BlotterRead>>({})
   const [ranking, setRanking] = useState(false)
+  const [view, setView] = useState<"list" | "calendar">("calendar")
 
   const tickerKey = ideas.map((idea) => idea.ticker).join(",")
 
@@ -110,7 +112,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
         const freshCutoff = Date.now() - 12 * 60 * 60 * 1000
         const missing = tickers.filter((ticker) => {
           const read = have[ticker]
-          return !read || !Object.prototype.hasOwnProperty.call(read, "deepGap") || !Object.prototype.hasOwnProperty.call(read, "sector") || !Object.prototype.hasOwnProperty.call(read, "payoutLine") || Date.parse(read.readAt) < freshCutoff
+          return !read || !Object.prototype.hasOwnProperty.call(read, "deepGap") || !Object.prototype.hasOwnProperty.call(read, "sector") || !Object.prototype.hasOwnProperty.call(read, "payoutLine") || !Object.prototype.hasOwnProperty.call(read, "events") || Date.parse(read.readAt) < freshCutoff
         })
         for (let index = 0; index < missing.length; index += 4) {
           if (cancel) return
@@ -275,6 +277,11 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
         </p>
       </div>
 
+      <div className="filters" role="group" aria-label="Watchlist view">
+        <button type="button" aria-pressed={view === "list"} onClick={() => setView("list")}>List</button>
+        <button type="button" aria-pressed={view === "calendar"} onClick={() => setView("calendar")}>Calendar</button>
+      </div>
+
       <div className="toolbar">
         <form className="ticker-form" onSubmit={add}>
           <label>
@@ -348,7 +355,14 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
             : null}
       </p>
 
-      {shown.length === 0 ? (
+      {view === "calendar" ? (
+        <EventCalendar
+          events={shown.flatMap((idea) => reads[idea.ticker]?.events ?? [])}
+          ranking={ranking}
+        />
+      ) : null}
+
+      {view === "calendar" ? null : shown.length === 0 ? (
         <div className="empty">
           <p className="lede">
             {ideas.length === 0

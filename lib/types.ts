@@ -279,6 +279,18 @@ export type FieldBrief = {
   note: string
 }
 
+/** A dated event already in a filing or the trial register. Heat is implied price impact, not an option price. */
+export type DeskEvent = {
+  date: string
+  ticker: string
+  label: string
+  detail: string
+  /** 0 is a routine date (deep blue). 1 is a binary result (dark red). */
+  heat: number
+  /** Last day of a window, when the marker date is the start of a span. */
+  until?: string
+}
+
 export type Report = {
   metrics: Metrics
   investors: InvestorScore[]
@@ -297,6 +309,8 @@ export type Report = {
   positioning: Positioning
   /** Dividends and repurchases. Absent on a report built before this section. */
   payout?: Payout | null
+  /** Dated events from the filings and the trial register. */
+  events?: DeskEvent[]
   /** True when this pass ignored the saved facts, annual report, and proxy. */
   pulledFresh: boolean
 }

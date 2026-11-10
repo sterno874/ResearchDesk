@@ -25,6 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </span>
             </a>
             <div className="top-actions">
+              <a className="calendar-link" href="/calendar">Calendar</a>
               <Tutorial />
               <p className="session">Filings · Price · Rubric</p>
             </div>
