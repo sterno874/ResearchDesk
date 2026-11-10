@@ -5,7 +5,7 @@ import { useEffect, useId, useState } from "react"
 const STEPS = [
   {
     title: "The blotter",
-    body: "The home page is the list of names. Collect ideas pulls recent SEC filings, posts from the value forums, and a news search. Add is for a ticker you already have in mind. Find on the desk narrows that list by ticker or company name. Filters keep filings, earnings, forums, news, names you saved, or names with a deep-value price. An industry filter keeps one sector and combines with Deep value. Deep value lists those names by how far the quote would have to move to reach that price, closest first. The stars stay the reader median. Sort by the rank, by the latest update, or by name.",
+    body: "The home page is the list of names. Collect ideas pulls recent SEC filings, posts from the value forums, and a news search. Add is for a ticker you already have in mind. Find on the desk narrows that list by ticker or company name. Filters keep filings, earnings, forums, news, names you saved, or names with a deep-value price. An industry filter keeps one sector and combines with Deep value. Dated keeps a phase 3 completion still ahead, an open refinance window, an open-market insider buy, or a Schedule 13D, and it combines with Deep value. Deep value lists those names by how far the quote would have to move to reach that price, closest first. The stars stay the reader median. Sort by the rank, by the latest update, or by name.",
   },
   {
     title: "Five marks and a clock",

@@ -41,6 +41,20 @@ function iso(date: Date): string {
   return `${date.getFullYear()}-${month}-${day}`
 }
 
+/** A phase 3 date still ahead, an open refinance window, a recent open-market buy, or a Schedule 13D. */
+export function datedMarks(events: DeskEvent[] | undefined, today = iso(new Date())): DeskEvent[] {
+  if (!events?.length) return []
+  return events.filter((event) => {
+    if (event.label === "Phase 3 primary completion") return event.date >= today
+    if (event.label === "Refinance window") return (event.until ?? event.date) >= today
+    return event.label === "Insider buy" || event.label === "Schedule 13D"
+  })
+}
+
+export function hasDatedCatalyst(events: DeskEvent[] | undefined, today = iso(new Date())): boolean {
+  return datedMarks(events, today).length > 0
+}
+
 function addDays(day: string, days: number): string {
   const [year, month, date] = day.split("-").map(Number)
   return iso(new Date(year, month - 1, date + days))

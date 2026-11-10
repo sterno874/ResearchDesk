@@ -2,11 +2,12 @@
 
 import { useEffect, useState, type FormEvent } from "react"
 import { EventCalendar } from "@/components/Calendar"
+import { datedMarks, hasDatedCatalyst } from "@/lib/events"
 import { Pips } from "@/components/Pips"
 import { gap, price } from "@/lib/format"
 import type { BlotterRead } from "@/lib/rank"
 import { apiUrl } from "@/lib/remote"
-import { SECTOR_SHORT, type CollectSummary, type Idea, type SectorId, type SourceKind } from "@/lib/types"
+import { SECTOR_SHORT, type CollectSummary, type DeskEvent, type Idea, type SectorId, type SourceKind } from "@/lib/types"
 
 const INDUSTRIES: SectorId[] = [
   "bank",
@@ -63,6 +64,19 @@ function deepTitle(read: BlotterRead): string {
   return `Quote ${price(read.price ?? null)} · deep value ${price(read.deep ?? null)}`
 }
 
+function eventWhen(day: string): string {
+  const [year, month, date] = day.split("-").map(Number)
+  if (!year || !month || !date) return day
+  return new Date(year, month - 1, date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+}
+
+function datedLine(events: DeskEvent[] | undefined): string {
+  const hits = datedMarks(events)
+  const ahead = hits.filter((event) => event.label === "Phase 3 primary completion" || event.label === "Refinance window")
+  const chosen = (ahead.length ? ahead : hits).slice().sort((a, b) => a.date.localeCompare(b.date))[0]
+  return chosen ? `${chosen.label} · ${eventWhen(chosen.date)}` : ""
+}
+
 function when(iso: string): string {
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return iso.slice(0, 10)
@@ -95,6 +109,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
   const [reads, setReads] = useState<Record<string, BlotterRead>>({})
   const [ranking, setRanking] = useState(false)
   const [view, setView] = useState<"list" | "calendar">("calendar")
+  const [dated, setDated] = useState(false)
 
   const tickerKey = ideas.map((idea) => idea.ticker).join(",")
 
@@ -155,6 +170,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
       return idea.sources.some((source) => source.kind === filter)
     })
     .filter((idea) => industry === "all" || reads[idea.ticker]?.sector === industry)
+    .filter((idea) => !dated || hasDatedCatalyst(reads[idea.ticker]?.events))
     .sort((a, b) => {
       if (filter === "deep" && sort === "rank") {
         const left = fromHere(reads[a.ticker])
@@ -186,6 +202,9 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
     : industryName
       ? ` ${industryName} only. The stars are still the reader median.`
       : ""
+  const datedNote = dated
+    ? " Dated keeps a phase 3 completion still ahead, an open refinance window, an open-market insider buy, or a Schedule 13D. The stars stay the reader median."
+    : ""
   const waitingNote = industry !== "all" && unread && ranking
     ? " Names still being read stay off this list until the filing says the industry."
     : ""
@@ -347,22 +366,24 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
           ))}
         </div>
       ) : null}
+      <div className="filters" role="group" aria-label="Dated events">
+        <button type="button" aria-pressed={!dated} onClick={() => setDated(false)}>Any date</button>
+        <button type="button" aria-pressed={dated} onClick={() => setDated(true)}>Dated</button>
+      </div>
       <p className="status">
         {ranking
-          ? `Reading filings for a rank. ${rankedCount} of ${ideas.length} ${ideas.length === 1 ? "name has" : "names have"} one.${rankNote}${waitingNote}`
+          ? `Reading filings for a rank. ${rankedCount} of ${ideas.length} ${ideas.length === 1 ? "name has" : "names have"} one.${rankNote}${datedNote}${waitingNote}`
           : rankedCount
-            ? `${rankedCount} of ${ideas.length} ranked from the latest report.${rankNote}${waitingNote}`
+            ? `${rankedCount} of ${ideas.length} ranked from the latest report.${rankNote}${datedNote}${waitingNote}`
             : null}
       </p>
 
-      {view === "calendar" ? (
+      {view === "calendar" && shown.length ? (
         <EventCalendar
           events={shown.flatMap((idea) => reads[idea.ticker]?.events ?? [])}
           ranking={ranking}
         />
-      ) : null}
-
-      {view === "calendar" ? null : shown.length === 0 ? (
+      ) : shown.length === 0 ? (
         <div className="empty">
           <p className="lede">
             {ideas.length === 0
@@ -371,7 +392,15 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
                 ? "Nothing in this filter matches that."
                 : needle
                   ? "Nothing on the desk matches that."
-                  : filter === "deep" && industry !== "all"
+                  : dated && filter === "deep"
+                    ? ranking
+                      ? "Reading the filings for a deep-value price and a dated event."
+                      : "None of these names has both a deep-value price and one of those dates."
+                    : dated
+                      ? ranking
+                        ? "Reading the filings for a dated event."
+                        : "None of these names has a phase 3 completion still ahead, an open refinance window, an open-market buy, or a Schedule 13D."
+                      : filter === "deep" && industry !== "all"
                     ? ranking
                       ? "Reading the filings for a deep-value price in this industry."
                       : "None of the names in this industry has a deep-value price on the latest read."
@@ -411,6 +440,7 @@ export function Desk({ initialIdeas }: { initialIdeas: Idea[] }) {
                     <p className="sector-line">{read.sectorLine ? `${read.sectorLabel} · ${read.sectorLine}` : read.sectorLabel}</p>
                   ) : null}
                   {read?.payoutLine ? <p className="sector-line">{read.payoutLine}</p> : null}
+                  {dated ? <p className="sector-line">{datedLine(read?.events)}</p> : null}
                   <p>{lead?.title}</p>
                   <div className="chips">
                     {idea.sources.map((source) => (
